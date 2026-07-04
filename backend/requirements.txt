@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pymupdf
+rapidocr-onnxruntime
+pypdf
+fastembed
+faiss-cpu
+groq
+python-dotenv
