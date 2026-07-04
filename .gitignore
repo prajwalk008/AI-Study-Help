@@ -1,0 +1,20 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+backend/.env
+backend/data/uploads/*
+backend/data/index/*
+!backend/data/uploads/.gitkeep
+!backend/data/index/.gitkeep
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+frontend/.env.local
+npm-debug.log*
+
+# Misc
+.DS_Store
+*.log

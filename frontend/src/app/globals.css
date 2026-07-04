@@ -1,0 +1,178 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #07070c;
+  --bg-soft: #0d0d16;
+  --panel: rgba(255, 255, 255, 0.04);
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --text: #ededf2;
+  --muted: #9aa0b4;
+  --accent: #8b5cf6;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-muted: var(--muted);
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Ambient gradient glows in the background */
+.aurora {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.aurora::before,
+.aurora::after {
+  content: "";
+  position: absolute;
+  width: 60vw;
+  height: 60vw;
+  border-radius: 9999px;
+  filter: blur(120px);
+  opacity: 0.28;
+}
+.aurora::before {
+  background: radial-gradient(circle, #7c3aed, transparent 60%);
+  top: -20%;
+  left: -10%;
+  animation: drift 18s ease-in-out infinite alternate;
+}
+.aurora::after {
+  background: radial-gradient(circle, #db2777, transparent 60%);
+  bottom: -25%;
+  right: -10%;
+  animation: drift 22s ease-in-out infinite alternate-reverse;
+}
+@keyframes drift {
+  from {
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    transform: translate(6%, 8%) scale(1.15);
+  }
+}
+
+/* Glass panel */
+.glass {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(14px);
+}
+
+.gradient-text {
+  background: linear-gradient(120deg, #a78bfa, #f0abfc, #818cf8);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.gradient-btn {
+  background: linear-gradient(120deg, #7c3aed, #c026d3);
+  transition: filter 0.2s ease, transform 0.1s ease;
+}
+.gradient-btn:hover {
+  filter: brightness(1.12);
+}
+.gradient-btn:active {
+  transform: translateY(1px);
+}
+.gradient-btn:disabled {
+  opacity: 0.5;
+  filter: grayscale(0.4);
+}
+
+/* Slim scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+}
+
+/* Blinking caret for streaming answers */
+.caret::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: #a78bfa;
+  animation: blink 1s steps(2) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Typing dots */
+.dot {
+  animation: bounce 1.2s infinite ease-in-out;
+}
+.dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}
+
+/* Markdown answer styling */
+.prose-answer p {
+  margin: 0.5rem 0;
+  line-height: 1.7;
+}
+.prose-answer ul,
+.prose-answer ol {
+  margin: 0.5rem 0;
+  padding-left: 1.4rem;
+  list-style: revert;
+}
+.prose-answer li {
+  margin: 0.25rem 0;
+}
+.prose-answer strong {
+  color: #fff;
+}
+.prose-answer code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.1rem 0.35rem;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
