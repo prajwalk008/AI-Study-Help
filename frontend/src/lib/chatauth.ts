@@ -6,12 +6,7 @@ export function toObjectId(id: string): ObjectId | null {
   return ObjectId.isValid(id) ? new ObjectId(id) : null;
 }
 
-/**
- * Central authorization gate for chat-scoped routes. Returns the owned chat document, or an
- * object describing why access is denied (missing session vs. not-owner/not-found → 404).
- * We deliberately return 404 (not 403) for chats the user doesn't own, to avoid leaking which
- * chatIds exist.
- */
+// 404 (not 403) on a chat you don't own, so the response can't be used to guess valid chat ids
 export async function requireOwnedChat(
   chatId: string
 ): Promise<

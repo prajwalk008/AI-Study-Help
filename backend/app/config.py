@@ -5,28 +5,29 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 
 # Shared secret required on every RAG endpoint (Next.js sends it server-side).
 INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
 
-# RAG tuning knobs (exposed so their trade-offs are explicit and defensible)
-CHUNK_SIZE_WORDS = 380      # ~500 tokens: big enough for context, small enough to stay specific
-CHUNK_OVERLAP_WORDS = 60    # ~80 tokens: preserves meaning across chunk boundaries
-TOP_K = 5                   # how many chunks we feed the LLM as grounding context
-EMBED_DIM = 384             # dimensionality of BAAI/bge-small-en-v1.5
+# Qdrant Cloud: vector storage (shared collection, isolated per chat via a payload filter).
+QDRANT_URL = os.getenv("QDRANT_URL", "")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "chunks")
 
-# OCR fallback (for scanned PDFs / photos of book pages that have no text layer)
+# RAG tuning knobs
+CHUNK_SIZE_WORDS = 380
+CHUNK_OVERLAP_WORDS = 60
+TOP_K = 5
+EMBED_DIM = 384             # BAAI/bge-small-en-v1.5 output size
+
+# OCR fallback for scanned PDFs
 OCR_ENABLED = True
-OCR_DPI = 200               # higher = better OCR accuracy but slower / more memory
-MIN_TEXT_CHARS_PER_PAGE = 20  # below this, treat the page as image-only and run OCR
+OCR_DPI = 200
+MIN_TEXT_CHARS_PER_PAGE = 20  # below this we assume the page has no real text layer
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
-INDEX_DIR = os.path.join(DATA_DIR, "index")
-INDEX_PATH = os.path.join(INDEX_DIR, "faiss.index")
-META_PATH = os.path.join(INDEX_DIR, "meta.json")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(INDEX_DIR, exist_ok=True)

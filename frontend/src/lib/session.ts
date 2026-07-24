@@ -17,6 +17,7 @@ function hashToken(token: string): string {
 }
 
 export async function createSession(userId: ObjectId): Promise<string> {
+  // only the hash is stored, so a DB leak doesn't hand out live sessions
   const token = crypto.randomBytes(32).toString("hex");
   const db = await getDb();
   const now = new Date();
