@@ -1,9 +1,4 @@
-"""FastAPI app: the internal, multi-tenant RAG service. Only Next.js calls it (server-side),
-authenticated with a shared secret. Every document/query is scoped to a chat_id, and each chat
-has its own isolated FAISS index.
-
-Streaming design: /api/chat and /api/upload return newline-delimited JSON (NDJSON) events.
-"""
+"""Internal RAG service. Only called by Next.js, server-side, with a shared secret."""
 import json
 import os
 import uuid

@@ -1,18 +1,7 @@
-"""Retrieval evaluation harness: measures how good our semantic search actually is.
-
-Why this matters (interview gold): most people *build* RAG but never *measure* it. Two
-standard metrics:
-  - Recall@k : is the correct passage among the top-k retrieved? (did we even find it?)
-  - MRR      : Mean Reciprocal Rank — how high up was the correct passage? (1.0 == always #1)
-
-We build a tiny labelled set: each question has one passage that truly answers it. We embed
-everything, run retrieval, and score. Run:  python eval_retrieval.py
-"""
-import faiss
+"""Checks retrieval quality with Recall@k and MRR against a small labeled set. Run directly."""
 import numpy as np
 from app import embeddings
 
-# (passage_id, text)
 PASSAGES = [
     ("photosynthesis", "Photosynthesis converts light energy into chemical energy stored in glucose inside chloroplasts."),
     ("mitochondria", "Mitochondria are the powerhouse of the cell and produce ATP through cellular respiration."),
@@ -22,7 +11,6 @@ PASSAGES = [
     ("http", "HTTP is a stateless protocol where a client sends requests and a server returns responses."),
 ]
 
-# (question, id_of_the_passage_that_answers_it)
 QUERIES = [
     ("How do plants make food from sunlight?", "photosynthesis"),
     ("Which organelle produces ATP energy?", "mitochondria"),
@@ -38,16 +26,16 @@ K = 3
 def main():
     ids = [pid for pid, _ in PASSAGES]
     vecs = embeddings.embed_passages([t for _, t in PASSAGES])
-    index = faiss.IndexFlatIP(vecs.shape[1])
-    index.add(vecs)
 
     hits_at_k = 0
     reciprocal_ranks = []
 
     for question, gold_id in QUERIES:
         qv = embeddings.embed_query(question)
-        _scores, idxs = index.search(qv, K)
-        ranked_ids = [ids[i] for i in idxs[0]]
+        # Vectors are L2-normalized, so a plain dot product is cosine similarity.
+        scores = vecs @ qv[0]
+        top_idxs = np.argsort(-scores)[:K]
+        ranked_ids = [ids[i] for i in top_idxs]
         if gold_id in ranked_ids:
             hits_at_k += 1
             rank = ranked_ids.index(gold_id) + 1

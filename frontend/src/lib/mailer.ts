@@ -5,7 +5,7 @@ let cached: Transporter | null = null;
 async function getTransport(): Promise<Transporter> {
   if (cached) return cached;
   if (process.env.USE_ETHEREAL === "true") {
-    // Ethereal: a fake SMTP inbox for dev. Mail isn't really delivered; we log a preview URL.
+    // fake SMTP inbox for local dev, nothing actually gets delivered
     const acc = await nodemailer.createTestAccount();
     cached = nodemailer.createTransport({
       host: "smtp.ethereal.email",
@@ -24,7 +24,7 @@ async function getTransport(): Promise<Transporter> {
   return cached;
 }
 
-/** Sends the OTP email. Returns an Ethereal preview URL in dev (null with real SMTP). */
+// returns an Ethereal preview link in dev, null once real SMTP is configured
 export async function sendOtpEmail(to: string, code: string): Promise<string | null> {
   const transport = await getTransport();
   const info = await transport.sendMail({
