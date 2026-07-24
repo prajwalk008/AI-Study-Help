@@ -47,17 +47,22 @@ export default function Home() {
 
   // Load a chat's messages + documents when it becomes active.
   useEffect(() => {
-    if (!activeChatId) {
-      setMessages([]);
-      setDocuments([]);
-      return;
-    }
+    if (!activeChatId) return;
     Promise.all([getMessages(activeChatId), getChatDocuments(activeChatId)]).then(([msgs, docs]) => {
       setMessages(msgs.map((m) => ({ id: m.id, role: m.role, content: m.content, sources: m.sources ?? undefined })));
       setDocuments(docs);
       setShowUpload(docs.length === 0);
     });
   }, [activeChatId]);
+
+  // clears the active chat and its loaded messages/documents together
+  const selectChat = (id: string | null) => {
+    setActiveChatId(id);
+    if (!id) {
+      setMessages([]);
+      setDocuments([]);
+    }
+  };
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -79,14 +84,14 @@ export default function Home() {
   const handleDeleteChat = async (id: string) => {
     await deleteChat(id);
     setChats((c) => c.filter((x) => x.id !== id));
-    if (activeChatId === id) setActiveChatId(null);
+    if (activeChatId === id) selectChat(null);
   };
 
   const handleLogout = async () => {
     await apiLogout();
     setUser(null);
     setChats([]);
-    setActiveChatId(null);
+    selectChat(null);
   };
 
   const onUploaded = async (r: UploadResult) => {
@@ -152,7 +157,7 @@ export default function Home() {
         chats={chats}
         activeChatId={activeChatId}
         user={user}
-        onSelect={setActiveChatId}
+        onSelect={selectChat}
         onNew={handleNewChat}
         onDelete={handleDeleteChat}
         onLogout={handleLogout}

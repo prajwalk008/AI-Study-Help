@@ -1,69 +1,116 @@
-"""Stage 4: the vector store. A FAISS index holds every chunk's embedding and lets us
-find the nearest ones to a query in milliseconds.
-
-Design choices (interview notes):
-- FAISS IndexFlatIP does exact inner-product search. Because vectors are L2-normalized,
-  inner product == cosine similarity, giving scores in a clean [-1, 1] range.
-- "Flat" = brute force = exact results. Perfect for a study app (thousands of chunks). At
-  millions of vectors you'd switch to an approximate index (IVF/HNSW) to trade a little
-  recall for a lot of speed. Knowing *when* to switch is the real interview signal.
-- We persist the index + a parallel metadata list so chunks survive restarts.
-"""
-import json
-import os
+"""Qdrant-backed vector store. One shared collection, chats isolated via a chat_id filter."""
+import uuid
 from typing import List, Tuple
-import faiss
 import numpy as np
+from qdrant_client import QdrantClient
+from qdrant_client.http.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    FilterSelector,
+    MatchValue,
+    PayloadSchemaType,
+    PointStruct,
+    VectorParams,
+)
 
 from . import config
 from .ingest import Chunk
 
+_ID_NAMESPACE = uuid.UUID("12345678-1234-5678-1234-567812345678")
+
+_client: QdrantClient | None = None
+
+
+def _get_client() -> QdrantClient:
+    global _client
+    if _client is None:
+        _client = QdrantClient(url=config.QDRANT_URL, api_key=config.QDRANT_API_KEY)
+        _ensure_collection(_client)
+    return _client
+
+
+def _ensure_collection(client: QdrantClient) -> None:
+    if client.collection_exists(config.QDRANT_COLLECTION):
+        return
+    client.create_collection(
+        collection_name=config.QDRANT_COLLECTION,
+        vectors_config=VectorParams(size=config.EMBED_DIM, distance=Distance.COSINE),
+    )
+    # needed so filtering by chat_id doesn't scan the whole collection
+    client.create_payload_index(
+        collection_name=config.QDRANT_COLLECTION,
+        field_name="chat_id",
+        field_schema=PayloadSchemaType.KEYWORD,
+    )
+
+
+def _point_id(chunk_id: str) -> str:
+    # qdrant point ids have to be an int or a uuid, our chunk ids aren't
+    return str(uuid.uuid5(_ID_NAMESPACE, chunk_id))
+
+
+def _chat_filter(chat_id: str) -> Filter:
+    return Filter(must=[FieldCondition(key="chat_id", match=MatchValue(value=chat_id))])
+
 
 class VectorStore:
-    def __init__(self, index_dir: str):
-        self.index_dir = index_dir
-        self.index_path = os.path.join(index_dir, "faiss.index")
-        self.meta_path = os.path.join(index_dir, "meta.json")
-        self.index = faiss.IndexFlatIP(config.EMBED_DIM)
-        self.metas: List[dict] = []  # parallel to index vectors: metas[i] describes vector i
-        self._load()
-
-    def _load(self):
-        if os.path.exists(self.index_path) and os.path.exists(self.meta_path):
-            self.index = faiss.read_index(self.index_path)
-            with open(self.meta_path, "r", encoding="utf-8") as f:
-                self.metas = json.load(f)
-
-    def _save(self):
-        os.makedirs(self.index_dir, exist_ok=True)
-        faiss.write_index(self.index, self.index_path)
-        with open(self.meta_path, "w", encoding="utf-8") as f:
-            json.dump(self.metas, f, ensure_ascii=False)
+    def __init__(self, chat_id: str):
+        self.chat_id = chat_id
+        self.client = _get_client()
 
     def add(self, chunks: List[Chunk], embeddings: np.ndarray):
-        self.index.add(embeddings)
-        self.metas.extend(c.to_dict() for c in chunks)
-        self._save()
+        points = [
+            PointStruct(
+                id=_point_id(c.id),
+                vector=embeddings[i].tolist(),
+                payload={"chat_id": self.chat_id, **c.to_dict()},
+            )
+            for i, c in enumerate(chunks)
+        ]
+        self.client.upsert(collection_name=config.QDRANT_COLLECTION, points=points)
 
     def search(self, query_vec: np.ndarray, k: int) -> List[Tuple[dict, float]]:
-        if self.index.ntotal == 0:
-            return []
-        k = min(k, self.index.ntotal)
-        scores, idxs = self.index.search(query_vec, k)
-        results = []
-        for score, idx in zip(scores[0], idxs[0]):
-            if idx == -1:
-                continue
-            results.append((self.metas[idx], float(score)))
-        return results
+        vec = query_vec[0] if query_vec.ndim == 2 else query_vec
+        hits = self.client.query_points(
+            collection_name=config.QDRANT_COLLECTION,
+            query=vec.tolist(),
+            query_filter=_chat_filter(self.chat_id),
+            limit=k,
+            with_payload=True,
+        ).points
+        return [(h.payload, float(h.score)) for h in hits]
 
     def documents(self) -> List[dict]:
         docs = {}
-        for m in self.metas:
-            d = docs.setdefault(m["doc_id"], {"doc_id": m["doc_id"], "doc_name": m["doc_name"], "chunks": 0})
-            d["chunks"] += 1
+        offset = None
+        while True:
+            points, offset = self.client.scroll(
+                collection_name=config.QDRANT_COLLECTION,
+                scroll_filter=_chat_filter(self.chat_id),
+                limit=256,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in points:
+                meta = point.payload
+                entry = docs.setdefault(meta["doc_id"], {"doc_id": meta["doc_id"], "doc_name": meta["doc_name"], "chunks": 0})
+                entry["chunks"] += 1
+            if offset is None:
+                break
         return list(docs.values())
+
+    def delete(self) -> None:
+        """Wipe every point for this chat (called when a chat is deleted)."""
+        self.client.delete(
+            collection_name=config.QDRANT_COLLECTION,
+            points_selector=FilterSelector(filter=_chat_filter(self.chat_id)),
+        )
 
     @property
     def total_chunks(self) -> int:
-        return self.index.ntotal
+        return self.client.count(
+            collection_name=config.QDRANT_COLLECTION,
+            count_filter=_chat_filter(self.chat_id),
+        ).count
