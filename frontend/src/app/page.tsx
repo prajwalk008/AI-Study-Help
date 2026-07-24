@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Sparkles, FileText, Plus, Loader2 } from "lucide-react";
+import { Sparkles, FileText, Plus, Loader2, Menu } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import LoginView from "@/components/LoginView";
 import UploadZone from "@/components/UploadZone";
@@ -33,6 +33,7 @@ export default function Home() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [thinking, setThinking] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Initial auth check.
@@ -153,10 +154,20 @@ export default function Home() {
 
   return (
     <div className="flex h-screen">
+      <button
+        onClick={() => setMobileNavOpen(true)}
+        className="glass fixed left-4 top-4 z-30 flex h-9 w-9 items-center justify-center rounded-xl text-zinc-200 md:hidden"
+        aria-label="Open menu"
+      >
+        <Menu className="h-4 w-4" />
+      </button>
+
       <Sidebar
         chats={chats}
         activeChatId={activeChatId}
         user={user}
+        open={mobileNavOpen}
+        onClose={() => setMobileNavOpen(false)}
         onSelect={selectChat}
         onNew={handleNewChat}
         onDelete={handleDeleteChat}
@@ -183,7 +194,7 @@ export default function Home() {
         ) : (
           <>
             {/* Header: documents + add PDF */}
-            <div className="flex items-center justify-between gap-3 border-b border-white/5 px-5 py-3">
+            <div className="flex items-center justify-between gap-3 border-b border-white/5 py-3 pl-14 pr-5 md:px-5">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 {documents.map((d) => (
                   <span key={d.id} className="glass flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs text-zinc-300">
