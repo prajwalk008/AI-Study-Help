@@ -18,3 +18,10 @@ npm-debug.log*
 # Misc
 .DS_Store
 *.log
+
+# Local credential notes (never commit real secrets)
+backend/AI_Study_help_api_key.txt
+backend/atlas-credentials.env
+
+# Personal design notes, not for the public repo
+DESIGN_NOTES.md

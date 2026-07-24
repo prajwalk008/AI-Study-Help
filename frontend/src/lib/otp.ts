@@ -9,12 +9,11 @@ export function normalizeEmail(raw: unknown): string | null {
 }
 
 export function generateOtp(): string {
-  // Cryptographically-random 6-digit code, zero-padded.
   return String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
 }
 
 export function hashOtp(email: string, code: string): string {
-  // HMAC with a server-side pepper so a DB leak doesn't reveal codes (and codes are short).
+  // pepper so a DB leak alone doesn't hand out valid codes
   const pepper = process.env.OTP_PEPPER || "";
   return crypto.createHmac("sha256", pepper).update(`${email}:${code}`).digest("hex");
 }

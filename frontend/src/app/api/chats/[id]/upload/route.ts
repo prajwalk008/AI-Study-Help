@@ -36,8 +36,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     return NextResponse.json({ error: "Indexing service unavailable." }, { status: 502 });
   }
 
-  // One branch streams to the browser; the other is consumed server-side to persist metadata,
-  // independent of client backpressure/disconnect.
+  // tee: browser gets one stream live, we consume the other to save metadata once it's done
   const [clientStream, sideStream] = upstream.body.tee();
   void (async () => {
     const reader = sideStream.getReader();
