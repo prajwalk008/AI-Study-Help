@@ -1,12 +1,4 @@
-"""Stage 1 + 2 of the RAG pipeline: ingest PDFs and chunk their text.
-
-Design choices (interview notes):
-- We extract text *per page* and keep the page number with every chunk. That page number
-  is what lets us show precise citations later ("Answer from p.12").
-- We chunk within page boundaries using a sliding word window with overlap. Overlap means a
-  sentence sitting on a chunk boundary still appears whole in at least one chunk, so retrieval
-  doesn't miss it. Trade-off: overlap duplicates some text (more vectors) for better recall.
-"""
+"""PDF ingestion + chunking."""
 from dataclasses import dataclass, asdict
 from typing import List, Iterator, Tuple, Optional, Callable
 import fitz  # PyMuPDF
@@ -28,13 +20,7 @@ class Chunk:
 
 
 def stream_pages(pdf_path: str) -> Iterator[Tuple[int, int, str]]:
-    """Yield (page_index, total_pages, page_text) one page at a time.
-
-    Yielding per page (instead of returning the whole list) lets callers report extraction
-    progress live — important because OCR on a scanned book is the slow part.
-    Hybrid strategy: read the embedded text layer first (fast); if a page is basically empty
-    (a scan/photo), fall back to OCR on a rendered image.
-    """
+    """Yield (page_index, total_pages, page_text) one page at a time."""
     doc = fitz.open(pdf_path)
     total = doc.page_count
     try:

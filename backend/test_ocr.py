@@ -1,8 +1,4 @@
-"""Verifies the OCR fallback works on an image-only PDF (a simulated photo/scan of a page).
-
-We render text onto a bitmap, wrap it in a PDF that has NO text layer, then confirm our
-ingest pipeline recovers the words via OCR.
-"""
+"""Builds a fake scanned PDF (no text layer) and checks the OCR fallback recovers the text."""
 import os
 import fitz
 from PIL import Image, ImageDraw, ImageFont
