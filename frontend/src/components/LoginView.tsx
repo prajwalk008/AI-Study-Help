@@ -52,6 +52,9 @@ export default function LoginView({ onSignedIn }: { onSignedIn: (user: User) => 
           <p className="mt-1 text-sm text-muted">
             {step === "email" ? "Sign in with your email — no password needed." : `We sent a 6-digit code to ${email}`}
           </p>
+          {step === "code" && (
+            <p className="mt-1 text-xs text-muted">Don&apos;t see it? Check your spam folder.</p>
+          )}
         </div>
 
         {step === "email" ? (
