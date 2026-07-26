@@ -126,6 +126,19 @@ async function readNdjson(res: Response, onEvent: (evt: Record<string, unknown>)
   }
 }
 
+const UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
+
+async function postChunkWithRetry(chatId: string, form: FormData): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(`/api/chats/${chatId}/upload/chunk`, { method: "POST", body: form });
+    if (res.ok) return;
+    if (attempt >= 2) {
+      const err = await res.json().catch(() => ({ error: "Upload failed" }));
+      throw new Error(err.error || "Upload failed");
+    }
+  }
+}
+
 export async function uploadPdf(
   chatId: string,
   file: File,
@@ -135,10 +148,26 @@ export async function uploadPdf(
     onError: (message: string) => void;
   }
 ): Promise<void> {
-  const form = new FormData();
-  form.append("file", file);
   try {
-    const res = await fetch(`/api/chats/${chatId}/upload`, { method: "POST", body: form });
+    const uploadId = crypto.randomUUID();
+    const total = Math.max(1, Math.ceil(file.size / UPLOAD_CHUNK_BYTES));
+
+    for (let index = 0; index < total; index++) {
+      const slice = file.slice(index * UPLOAD_CHUNK_BYTES, (index + 1) * UPLOAD_CHUNK_BYTES);
+      const form = new FormData();
+      form.append("uploadId", uploadId);
+      form.append("index", String(index));
+      form.append("total", String(total));
+      form.append("chunk", slice, file.name);
+      await postChunkWithRetry(chatId, form);
+      handlers.onProgress({ stage: "Uploading", pct: (index + 1) / total });
+    }
+
+    const res = await fetch(`/api/chats/${chatId}/upload/finish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uploadId, filename: file.name, total }),
+    });
     if (!res.ok || !res.body) {
       const err = await res.json().catch(() => ({ error: "Upload failed" }));
       handlers.onError(err.error || "Upload failed");
