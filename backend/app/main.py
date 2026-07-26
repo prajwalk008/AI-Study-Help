@@ -2,13 +2,14 @@
 import json
 import os
 import shutil
+import threading
 import uuid
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from . import config, store_manager
+from . import config, jobs, store_manager
 from .llm import stream_chat
 from .rag import RAGEngine
 
@@ -69,12 +70,37 @@ async def upload_chunk(
     existing = sum(os.path.getsize(os.path.join(chunk_dir, f)) for f in os.listdir(chunk_dir))
     if existing + len(data) > config.MAX_UPLOAD_BYTES:
         shutil.rmtree(chunk_dir, ignore_errors=True)
-        raise HTTPException(status_code=413, detail="File too large (max 25 MB).")
+        max_mb = config.MAX_UPLOAD_BYTES // (1024 * 1024)
+        raise HTTPException(status_code=413, detail=f"File too large (max {max_mb} MB).")
 
     with open(os.path.join(chunk_dir, f"{index:05d}.part"), "wb") as f:
         f.write(data)
 
     return {"ok": True}
+
+
+def _run_ingest_job(doc_id: str, chat_id: str, dest: str, filename: str) -> None:
+    jobs.update_job(doc_id, status="running")
+    try:
+        for evt in engine.ingest_pdf_stream(chat_id, dest, filename, doc_id):
+            if evt["type"] == "empty":
+                jobs.update_job(
+                    doc_id,
+                    status="error",
+                    error="No extractable text found (is it a scanned PDF with unreadable images?).",
+                )
+                return
+            if evt["type"] == "progress":
+                jobs.update_job(doc_id, stage=evt["stage"], pct=evt["pct"])
+            elif evt["type"] == "done":
+                jobs.update_job(doc_id, status="done", pct=1.0, stats=evt["stats"])
+    except Exception as e:
+        jobs.update_job(doc_id, status="error", error=f"Failed to ingest PDF: {e}")
+    finally:
+        try:
+            os.remove(dest)
+        except OSError:
+            pass
 
 
 @app.post("/api/upload/finish", dependencies=[Depends(require_secret)])
@@ -95,33 +121,25 @@ async def upload_finish(
         shutil.rmtree(chunk_dir, ignore_errors=True)
         raise HTTPException(status_code=400, detail="Upload incomplete.")
 
-    safe_name = f"{uuid.uuid4().hex[:8]}_{os.path.basename(filename)}"
-    dest = os.path.join(config.UPLOAD_DIR, safe_name)
+    doc_id = uuid.uuid4().hex[:8]
+    dest = os.path.join(config.UPLOAD_DIR, f"{doc_id}_{os.path.basename(filename)}")
     with open(dest, "wb") as out:
         for part_path in parts:
             with open(part_path, "rb") as part:
                 out.write(part.read())
     shutil.rmtree(chunk_dir, ignore_errors=True)
 
-    def event_stream():
-        try:
-            for evt in engine.ingest_pdf_stream(chat_id, dest, filename):
-                if evt.get("type") == "empty":
-                    yield json.dumps({
-                        "type": "error",
-                        "detail": "No extractable text found (is it a scanned PDF with unreadable images?).",
-                    }) + "\n"
-                    return
-                yield json.dumps(evt) + "\n"
-        except Exception as e:
-            yield json.dumps({"type": "error", "detail": f"Failed to ingest PDF: {e}"}) + "\n"
-        finally:
-            try:
-                os.remove(dest)
-            except OSError:
-                pass
+    jobs.create_job(doc_id)
+    threading.Thread(target=_run_ingest_job, args=(doc_id, chat_id, dest, filename), daemon=True).start()
+    return {"doc_id": doc_id, "bytes": os.path.getsize(dest)}
 
-    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
+
+@app.get("/api/upload/status", dependencies=[Depends(require_secret)])
+def upload_status(doc_id: str = Query(...)):
+    job = jobs.get_job(doc_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Unknown job.")
+    return job
 
 
 @app.post("/api/chat", dependencies=[Depends(require_secret)])

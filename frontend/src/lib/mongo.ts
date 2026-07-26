@@ -39,6 +39,7 @@ function ensureIndexes(db: Db): Promise<void> {
       await db.collection("chats").createIndex({ userId: 1, updatedAt: -1 });
       await db.collection("messages").createIndex({ chatId: 1, createdAt: 1 });
       await db.collection("documents").createIndex({ chatId: 1, createdAt: 1 });
+      await db.collection("documents").createIndex({ userId: 1 });
     })().catch((e) => {
       globalForMongo._mongoIndexesReady = undefined; // allow retry on next call
       throw e;
