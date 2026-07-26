@@ -1,4 +1,5 @@
 """Qdrant-backed vector store. One shared collection, chats isolated via a chat_id filter."""
+import time
 import uuid
 from typing import List, Tuple
 import numpy as np
@@ -18,7 +19,7 @@ from . import config
 from .ingest import Chunk
 
 _ID_NAMESPACE = uuid.UUID("12345678-1234-5678-1234-567812345678")
-_UPSERT_BATCH_SIZE = 100
+_UPSERT_BATCH_SIZE = 20  # this cluster writes ~0.2s/point, keep batches well under the client timeout
 
 _client: QdrantClient | None = None
 
@@ -73,7 +74,17 @@ class VectorStore:
         # one big upsert can time out for large documents, so send it in batches
         for i in range(0, len(points), _UPSERT_BATCH_SIZE):
             batch = points[i:i + _UPSERT_BATCH_SIZE]
-            self.client.upsert(collection_name=config.QDRANT_COLLECTION, points=batch)
+            self._upsert_with_retry(batch)
+
+    def _upsert_with_retry(self, batch: List[PointStruct], attempts: int = 3) -> None:
+        for attempt in range(1, attempts + 1):
+            try:
+                self.client.upsert(collection_name=config.QDRANT_COLLECTION, points=batch)
+                return
+            except Exception:
+                if attempt == attempts:
+                    raise
+                time.sleep(1)
 
     def search(self, query_vec: np.ndarray, k: int) -> List[Tuple[dict, float]]:
         vec = query_vec[0] if query_vec.ndim == 2 else query_vec
