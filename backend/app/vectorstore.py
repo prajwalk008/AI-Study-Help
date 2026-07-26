@@ -18,6 +18,7 @@ from . import config
 from .ingest import Chunk
 
 _ID_NAMESPACE = uuid.UUID("12345678-1234-5678-1234-567812345678")
+_UPSERT_BATCH_SIZE = 100
 
 _client: QdrantClient | None = None
 
@@ -25,7 +26,8 @@ _client: QdrantClient | None = None
 def _get_client() -> QdrantClient:
     global _client
     if _client is None:
-        _client = QdrantClient(url=config.QDRANT_URL, api_key=config.QDRANT_API_KEY)
+        # default REST timeout is 5s, too tight for a round trip to a distant cluster
+        _client = QdrantClient(url=config.QDRANT_URL, api_key=config.QDRANT_API_KEY, timeout=30)
         _ensure_collection(_client)
     return _client
 
@@ -68,7 +70,10 @@ class VectorStore:
             )
             for i, c in enumerate(chunks)
         ]
-        self.client.upsert(collection_name=config.QDRANT_COLLECTION, points=points)
+        # one big upsert can time out for large documents, so send it in batches
+        for i in range(0, len(points), _UPSERT_BATCH_SIZE):
+            batch = points[i:i + _UPSERT_BATCH_SIZE]
+            self.client.upsert(collection_name=config.QDRANT_COLLECTION, points=batch)
 
     def search(self, query_vec: np.ndarray, k: int) -> List[Tuple[dict, float]]:
         vec = query_vec[0] if query_vec.ndim == 2 else query_vec
