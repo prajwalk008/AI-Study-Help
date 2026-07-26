@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { ObjectId } from "mongodb";
 import { getDb } from "@/lib/mongo";
 import { requireOwnedChat } from "@/lib/chatauth";
 import { fastapiFetch } from "@/lib/fastapi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -22,49 +22,19 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   const qs = new URLSearchParams({ chat_id: id, upload_id: uploadId, filename, total: String(total) });
   const upstream = await fastapiFetch(`/api/upload/finish?${qs}`, { method: "POST" });
-  if (!upstream.ok || !upstream.body) {
-    return NextResponse.json({ error: "Indexing service unavailable." }, { status: 502 });
+  const body = await upstream.json().catch(() => ({}));
+  if (!upstream.ok) {
+    return NextResponse.json({ error: body.error || "Indexing service unavailable." }, { status: upstream.status || 502 });
   }
 
-  // tee: browser gets one stream live, we consume the other to save metadata once it's done
-  const [clientStream, sideStream] = upstream.body.tee();
-  void (async () => {
-    const reader = sideStream.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    let stats: { doc_name: string; chunks: number; pages: number } | null = null;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      const lines = buf.split("\n");
-      buf = lines.pop() || "";
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const e = JSON.parse(line);
-          if (e.type === "done") stats = e.stats;
-        } catch {
-          /* ignore partial */
-        }
-      }
-    }
-    if (stats) {
-      const db = await getDb();
-      await db.collection("documents").insertOne({
-        chatId: id,
-        userId: gate.userId,
-        docName: stats.doc_name,
-        chunks: stats.chunks,
-        pages: stats.pages,
-        status: "indexed",
-        createdAt: new Date(),
-      });
-      await db.collection("chats").updateOne({ _id: new ObjectId(id) }, { $set: { updatedAt: new Date() } });
-    }
-  })().catch(() => {});
+  const docId = body.doc_id as string;
+  const db = await getDb();
+  // the reservation row was created at the first chunk; attach the doc_id now and
+  // correct the recorded size to the real reassembled byte count
+  await db.collection("documents").updateOne(
+    { chatId: id, uploadId },
+    { $set: { docId, sizeBytes: body.bytes } }
+  );
 
-  return new Response(clientStream, {
-    headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-cache, no-transform" },
-  });
+  return NextResponse.json({ docId });
 }

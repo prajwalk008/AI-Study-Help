@@ -32,4 +32,4 @@ UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+MAX_UPLOAD_BYTES = 500 * 1024 * 1024
