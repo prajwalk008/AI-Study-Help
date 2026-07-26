@@ -45,18 +45,22 @@ def extract_pages(pdf_path: str, on_page: Optional[Callable[[int, int], None]] =
     return pages
 
 
+def chunk_page(page_text: str, page_no: int, doc_id: str, doc_name: str) -> List[Chunk]:
+    """Turn a single page's text into Chunks tagged with that page number."""
+    chunks = []
+    for local_idx, piece in enumerate(
+        _chunk_words(page_text, config.CHUNK_SIZE_WORDS, config.CHUNK_OVERLAP_WORDS)
+    ):
+        chunk_id = f"{doc_id}_p{page_no}_c{local_idx}"
+        chunks.append(Chunk(id=chunk_id, doc_id=doc_id, doc_name=doc_name, page=page_no, text=piece))
+    return chunks
+
+
 def chunks_from_pages(pages: List[str], doc_id: str, doc_name: str) -> List[Chunk]:
     """Turn a list of page texts into Chunks, each tagged with its page number."""
     chunks: List[Chunk] = []
     for page_idx, page_text in enumerate(pages):
-        page_no = page_idx + 1
-        for local_idx, piece in enumerate(
-            _chunk_words(page_text, config.CHUNK_SIZE_WORDS, config.CHUNK_OVERLAP_WORDS)
-        ):
-            chunk_id = f"{doc_id}_p{page_no}_c{local_idx}"
-            chunks.append(
-                Chunk(id=chunk_id, doc_id=doc_id, doc_name=doc_name, page=page_no, text=piece)
-            )
+        chunks.extend(chunk_page(page_text, page_idx + 1, doc_id, doc_name))
     return chunks
 
 
