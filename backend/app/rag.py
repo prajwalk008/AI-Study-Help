@@ -1,5 +1,4 @@
 """Ties the pipeline together: retrieve chunks, build a grounded prompt, generate an answer."""
-import uuid
 from typing import Iterator, List, Dict, Tuple
 
 import numpy as np
@@ -20,9 +19,7 @@ SYSTEM_PROMPT = (
 
 
 class RAGEngine:
-    def ingest_pdf_stream(self, chat_id: str, pdf_path: str, doc_name: str) -> Iterator[dict]:
-        doc_id = uuid.uuid4().hex[:8]
-
+    def ingest_pdf_stream(self, chat_id: str, pdf_path: str, doc_name: str, doc_id: str) -> Iterator[dict]:
         total_chunks = 0
         pages_count = 0
         batch_chunks: List = []

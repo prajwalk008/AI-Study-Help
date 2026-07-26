@@ -139,6 +139,37 @@ async function postChunkWithRetry(chatId: string, form: FormData): Promise<void>
   }
 }
 
+const STATUS_POLL_MS = 1500;
+
+async function pollUploadStatus(
+  chatId: string,
+  docId: string,
+  handlers: {
+    onProgress: (p: UploadProgress) => void;
+    onDone: (r: UploadResult) => void;
+    onError: (message: string) => void;
+  }
+): Promise<void> {
+  for (;;) {
+    const res = await fetch(`/api/chats/${chatId}/upload/status?docId=${encodeURIComponent(docId)}`);
+    const job = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      handlers.onError(job.error || "Status check failed");
+      return;
+    }
+    if (job.status === "done") {
+      handlers.onDone(job.stats as UploadResult);
+      return;
+    }
+    if (job.status === "error") {
+      handlers.onError(job.error || "Failed to ingest PDF.");
+      return;
+    }
+    handlers.onProgress({ stage: job.stage ?? "Processing", pct: job.pct ?? 0 });
+    await new Promise((r) => setTimeout(r, STATUS_POLL_MS));
+  }
+}
+
 export async function uploadPdf(
   chatId: string,
   file: File,
@@ -158,6 +189,8 @@ export async function uploadPdf(
       form.append("uploadId", uploadId);
       form.append("index", String(index));
       form.append("total", String(total));
+      form.append("fileSize", String(file.size));
+      form.append("filename", file.name);
       form.append("chunk", slice, file.name);
       await postChunkWithRetry(chatId, form);
       handlers.onProgress({ stage: "Uploading", pct: (index + 1) / total });
@@ -168,16 +201,12 @@ export async function uploadPdf(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ uploadId, filename: file.name, total }),
     });
-    if (!res.ok || !res.body) {
-      const err = await res.json().catch(() => ({ error: "Upload failed" }));
-      handlers.onError(err.error || "Upload failed");
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      handlers.onError(body.error || "Upload failed");
       return;
     }
-    await readNdjson(res, (evt) => {
-      if (evt.type === "progress") handlers.onProgress({ stage: evt.stage as string, pct: evt.pct as number });
-      else if (evt.type === "done") handlers.onDone(evt.stats as UploadResult);
-      else if (evt.type === "error") handlers.onError(evt.detail as string);
-    });
+    await pollUploadStatus(chatId, body.docId as string, handlers);
   } catch (e) {
     handlers.onError(e instanceof Error ? e.message : "Network error");
   }
