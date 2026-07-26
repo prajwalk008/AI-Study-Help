@@ -5,12 +5,11 @@ from typing import Iterator, List, Dict, Tuple
 import numpy as np
 
 from . import config, embeddings, store_manager
-from .ingest import chunk_document, stream_pages, chunks_from_pages
+from .ingest import chunk_page, stream_pages
 
-# progress bar weights for the upload stream; extraction/embedding are the slow parts
-EXTRACT_WEIGHT = 0.40
-EMBED_WEIGHT = 0.55
+PROCESS_WEIGHT = 0.95  # rest of the bar is the final indexing step
 PROGRESS_STEP = 0.005
+INGEST_BATCH_SIZE = 100  # flush to qdrant every N chunks instead of holding the whole doc in memory
 
 SYSTEM_PROMPT = (
     "You are a precise study assistant. Answer the student's question using ONLY the numbered "
@@ -24,35 +23,46 @@ class RAGEngine:
     def ingest_pdf_stream(self, chat_id: str, pdf_path: str, doc_name: str) -> Iterator[dict]:
         doc_id = uuid.uuid4().hex[:8]
 
-        pages: List[str] = []
+        total_chunks = 0
+        pages_count = 0
+        batch_chunks: List = []
+        batch_vecs: List[np.ndarray] = []
         last_pct = 0.0
+
+        def flush_batch():
+            nonlocal batch_chunks, batch_vecs
+            if not batch_chunks:
+                return
+            with store_manager.get_lock(chat_id):
+                store_manager.get_store(chat_id).add(batch_chunks, np.array(batch_vecs, dtype="float32"))
+            batch_chunks = []
+            batch_vecs = []
+
+        # process one page at a time (extract -> chunk -> embed -> flush) so memory
+        # usage stays flat instead of growing with document size
         for idx, total, text in stream_pages(pdf_path):
-            pages.append(text)
-            pct = EXTRACT_WEIGHT * (idx + 1) / max(total, 1)
+            pages_count = idx + 1
+            page_chunks = chunk_page(text, pages_count, doc_id, doc_name)
+            if page_chunks:
+                page_vecs = list(embeddings.iter_embed_passages([c.text for c in page_chunks]))
+                batch_chunks.extend(page_chunks)
+                batch_vecs.extend(page_vecs)
+                total_chunks += len(page_chunks)
+                if len(batch_chunks) >= INGEST_BATCH_SIZE:
+                    flush_batch()
+
+            pct = PROCESS_WEIGHT * (idx + 1) / max(total, 1)
             if pct - last_pct >= PROGRESS_STEP or idx + 1 == total:
                 last_pct = pct
-                yield {"type": "progress", "stage": f"Reading pages ({idx + 1}/{total})", "pct": round(pct, 4)}
+                yield {"type": "progress", "stage": f"Processing pages ({idx + 1}/{total})", "pct": round(pct, 4)}
 
-        chunks = chunks_from_pages(pages, doc_id, doc_name)
-        if not chunks:
+        flush_batch()
+
+        if total_chunks == 0:
             yield {"type": "empty"}
             return
 
-        texts = [c.text for c in chunks]
-        total_chunks = len(texts)
-        vecs: List[np.ndarray] = []
-        last_pct = EXTRACT_WEIGHT
-        for i, vec in enumerate(embeddings.iter_embed_passages(texts)):
-            vecs.append(vec)
-            pct = EXTRACT_WEIGHT + EMBED_WEIGHT * (i + 1) / total_chunks
-            if pct - last_pct >= PROGRESS_STEP or i + 1 == total_chunks:
-                last_pct = pct
-                yield {"type": "progress", "stage": f"Embedding chunks ({i + 1}/{total_chunks})", "pct": round(pct, 4)}
-
         yield {"type": "progress", "stage": "Indexing", "pct": 0.97}
-        with store_manager.get_lock(chat_id):
-            store_manager.get_store(chat_id).add(chunks, np.array(vecs, dtype="float32"))
-        pages_count = max(c.page for c in chunks)
         yield {
             "type": "done",
             "pct": 1.0,
