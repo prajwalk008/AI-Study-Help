@@ -7,31 +7,21 @@ import { fastapiFetch } from "@/lib/fastapi";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_BYTES = 25 * 1024 * 1024; // 25 MB cap for study PDFs
-
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   const gate = await requireOwnedChat(id);
   if (!gate.ok) return NextResponse.json({ error: gate.error }, { status: gate.status });
 
-  const form = await req.formData();
-  const file = form.get("file");
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "No file provided." }, { status: 400 });
+  const { uploadId, filename, total } = await req.json();
+  if (typeof uploadId !== "string" || typeof filename !== "string" || typeof total !== "number") {
+    return NextResponse.json({ error: "Malformed finish request." }, { status: 400 });
   }
-  if (!file.name.toLowerCase().endsWith(".pdf")) {
+  if (!filename.toLowerCase().endsWith(".pdf")) {
     return NextResponse.json({ error: "Only PDF files are supported." }, { status: 400 });
   }
-  if (file.size > MAX_BYTES) {
-    return NextResponse.json({ error: "File too large (max 25 MB)." }, { status: 413 });
-  }
 
-  const upstreamForm = new FormData();
-  upstreamForm.append("file", file, file.name);
-  const upstream = await fastapiFetch(`/api/upload?chat_id=${encodeURIComponent(id)}`, {
-    method: "POST",
-    body: upstreamForm,
-  });
+  const qs = new URLSearchParams({ chat_id: id, upload_id: uploadId, filename, total: String(total) });
+  const upstream = await fastapiFetch(`/api/upload/finish?${qs}`, { method: "POST" });
   if (!upstream.ok || !upstream.body) {
     return NextResponse.json({ error: "Indexing service unavailable." }, { status: 502 });
   }
