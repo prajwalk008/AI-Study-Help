@@ -17,9 +17,10 @@ app = FastAPI(title="Recall RAG service", version="2.0")
 
 engine = RAGEngine()
 
+_ingest_semaphore = threading.Semaphore(config.MAX_CONCURRENT_INGESTS)
+
 
 def require_secret(x_internal_secret: str = Header(default="")):
-    """Reject any caller that doesn't present the shared internal secret."""
     if not config.INTERNAL_API_SECRET or x_internal_secret != config.INTERNAL_API_SECRET:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -46,92 +47,133 @@ def documents(chat_id: str = Query(...)):
     return {"documents": docs, "total_chunks": sum(d["chunks"] for d in docs)}
 
 
-def valid_upload(upload_id: str) -> str:
-    if not store_manager.valid_upload_id(upload_id):
-        raise HTTPException(status_code=400, detail="Invalid upload_id.")
-    return upload_id
-
-
-@app.post("/api/upload/chunk", dependencies=[Depends(require_secret)])
-async def upload_chunk(
-    upload_id: str = Query(...),
-    index: int = Query(...),
-    total: int = Query(...),
-    chunk: UploadFile = File(...),
-):
-    valid_upload(upload_id)
-    if index < 0 or total < 1 or index >= total:
-        raise HTTPException(status_code=400, detail="Invalid chunk index.")
-
-    chunk_dir = os.path.join(config.UPLOAD_DIR, upload_id)
-    os.makedirs(chunk_dir, exist_ok=True)
-    data = await chunk.read()
-
-    existing = sum(os.path.getsize(os.path.join(chunk_dir, f)) for f in os.listdir(chunk_dir))
-    if existing + len(data) > config.MAX_UPLOAD_BYTES:
-        shutil.rmtree(chunk_dir, ignore_errors=True)
-        max_mb = config.MAX_UPLOAD_BYTES // (1024 * 1024)
-        raise HTTPException(status_code=413, detail=f"File too large (max {max_mb} MB).")
-
-    with open(os.path.join(chunk_dir, f"{index:05d}.part"), "wb") as f:
-        f.write(data)
-
-    return {"ok": True}
-
-
-def _run_ingest_job(doc_id: str, chat_id: str, dest: str, filename: str) -> None:
-    jobs.update_job(doc_id, status="running")
-    try:
-        for evt in engine.ingest_pdf_stream(chat_id, dest, filename, doc_id):
-            if evt["type"] == "empty":
-                jobs.update_job(
-                    doc_id,
-                    status="error",
-                    error="No extractable text found (is it a scanned PDF with unreadable images?).",
-                )
-                return
-            if evt["type"] == "progress":
-                jobs.update_job(doc_id, stage=evt["stage"], pct=evt["pct"])
-            elif evt["type"] == "done":
-                jobs.update_job(doc_id, status="done", pct=1.0, stats=evt["stats"])
-    except Exception as e:
-        jobs.update_job(doc_id, status="error", error=f"Failed to ingest PDF: {e}")
-    finally:
+def _run_segment_job(
+    doc_id: str,
+    chat_id: str,
+    dest: str,
+    filename: str,
+    *,
+    page_offset: int,
+    total_pages: int,
+    segment_index: int,
+    total_segments: int,
+) -> None:
+    with _ingest_semaphore:
+        jobs.update_job(doc_id, status="running")
         try:
-            os.remove(dest)
-        except OSError:
-            pass
+            for evt in engine.ingest_pdf_segment(
+                chat_id,
+                dest,
+                filename,
+                doc_id,
+                page_offset=page_offset,
+                total_pages=total_pages,
+                segment_index=segment_index,
+                total_segments=total_segments,
+            ):
+                if evt["type"] == "empty":
+                    jobs.update_job(
+                        doc_id,
+                        status="error",
+                        error="No extractable text found (is it a scanned PDF with unreadable images?).",
+                    )
+                    return
+                if evt["type"] == "progress":
+                    jobs.update_job(doc_id, stage=evt["stage"], pct=evt["pct"])
+                elif evt["type"] == "segment_done":
+                    completed = segment_index + 1
+                    jobs.update_job(doc_id, completed_segments=completed)
+                    if completed >= total_segments:
+                        job = jobs.get_job(doc_id) or {}
+                        if job.get("total_chunks", 0) == 0:
+                            jobs.update_job(
+                                doc_id,
+                                status="error",
+                                error="No extractable text found (is it a scanned PDF with unreadable images?).",
+                            )
+                            return
+                        jobs.update_job(
+                            doc_id,
+                            status="done",
+                            pct=1.0,
+                            stage="Indexed",
+                            stats={
+                                "doc_id": doc_id,
+                                "doc_name": filename,
+                                "chunks": job.get("total_chunks", 0),
+                                "pages": total_pages,
+                            },
+                        )
+                    else:
+                        jobs.update_job(
+                            doc_id,
+                            stage=f"Part {completed}/{total_segments} done",
+                        )
+        except Exception as e:
+            jobs.update_job(doc_id, status="error", error=f"Failed to ingest PDF: {e}")
+        finally:
+            try:
+                os.remove(dest)
+            except OSError:
+                pass
 
 
-@app.post("/api/upload/finish", dependencies=[Depends(require_secret)])
-async def upload_finish(
+@app.post("/api/upload/segment", dependencies=[Depends(require_secret)])
+async def upload_segment(
     chat_id: str = Query(...),
-    upload_id: str = Query(...),
     filename: str = Query(...),
-    total: int = Query(...),
+    segment_index: int = Query(...),
+    total_segments: int = Query(...),
+    page_offset: int = Query(...),
+    total_pages: int = Query(...),
+    doc_id: str = Query(default=""),
+    file: UploadFile = File(...),
 ):
     valid_chat(chat_id)
-    valid_upload(upload_id)
     if not filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+    if segment_index < 0 or total_segments < 1 or segment_index >= total_segments:
+        raise HTTPException(status_code=400, detail="Invalid segment index.")
+    if total_pages < 1:
+        raise HTTPException(status_code=400, detail="Invalid page count.")
 
-    chunk_dir = os.path.join(config.UPLOAD_DIR, upload_id)
-    parts = [os.path.join(chunk_dir, f"{i:05d}.part") for i in range(total)]
-    if not all(os.path.isfile(p) for p in parts):
-        shutil.rmtree(chunk_dir, ignore_errors=True)
-        raise HTTPException(status_code=400, detail="Upload incomplete.")
+    data = await file.read()
+    if len(data) > config.MAX_SEGMENT_BYTES:
+        max_mb = config.MAX_SEGMENT_BYTES / (1024 * 1024)
+        raise HTTPException(status_code=413, detail=f"Part too large (max {max_mb:g} MB).")
 
-    doc_id = uuid.uuid4().hex[:8]
-    dest = os.path.join(config.UPLOAD_DIR, f"{doc_id}_{os.path.basename(filename)}")
-    with open(dest, "wb") as out:
-        for part_path in parts:
-            with open(part_path, "rb") as part:
-                out.write(part.read())
-    shutil.rmtree(chunk_dir, ignore_errors=True)
+    if not doc_id:
+        doc_id = uuid.uuid4().hex[:8]
+        jobs.create_job(
+            doc_id,
+            total_segments=total_segments,
+            total_pages=total_pages,
+            doc_name=filename,
+        )
+    else:
+        job = jobs.get_job(doc_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Unknown document job.")
+        if job.get("completed_segments", 0) != segment_index:
+            raise HTTPException(status_code=409, detail="Upload parts in order.")
 
-    jobs.create_job(doc_id)
-    threading.Thread(target=_run_ingest_job, args=(doc_id, chat_id, dest, filename), daemon=True).start()
-    return {"doc_id": doc_id, "bytes": os.path.getsize(dest)}
+    dest = os.path.join(config.UPLOAD_DIR, f"{doc_id}_p{segment_index}_{os.path.basename(filename)}")
+    with open(dest, "wb") as f:
+        f.write(data)
+
+    threading.Thread(
+        target=_run_segment_job,
+        args=(doc_id, chat_id, dest, filename),
+        kwargs={
+            "page_offset": page_offset,
+            "total_pages": total_pages,
+            "segment_index": segment_index,
+            "total_segments": total_segments,
+        },
+        daemon=True,
+    ).start()
+
+    return {"doc_id": doc_id}
 
 
 @app.get("/api/upload/status", dependencies=[Depends(require_secret)])

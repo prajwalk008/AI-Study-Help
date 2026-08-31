@@ -86,6 +86,8 @@ export default function Home() {
     await deleteChat(id);
     setChats((c) => c.filter((x) => x.id !== id));
     if (activeChatId === id) selectChat(null);
+    const me = await getMe();
+    if (me) setUser(me);
   };
 
   const handleLogout = async () => {
@@ -216,7 +218,13 @@ export default function Home() {
             {showUpload && (
               <div className="border-b border-white/5 p-4">
                 <div className="mx-auto max-w-md">
-                  <UploadZone chatId={activeChatId} onUploaded={onUploaded} />
+                  <UploadZone
+                    chatId={activeChatId}
+                    onUploaded={onUploaded}
+                    onStorageChange={(used, quota) =>
+                      setUser((u) => (u ? { ...u, storageUsedBytes: used, storageQuotaBytes: quota } : u))
+                    }
+                  />
                 </div>
               </div>
             )}

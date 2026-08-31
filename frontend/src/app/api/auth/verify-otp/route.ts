@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongo";
 import { normalizeEmail, hashOtp, safeEqualHex } from "@/lib/otp";
 import { createSession, setSessionCookie } from "@/lib/session";
+import { STORAGE_QUOTA_BYTES } from "@/lib/uploadLimits";
 
 export const runtime = "nodejs";
 
@@ -48,7 +49,14 @@ export async function POST(req: Request) {
   const users = db.collection("users");
   await users.updateOne(
     { email },
-    { $set: { email, verified: true }, $setOnInsert: { createdAt: new Date() } },
+    {
+      $set: { email, verified: true },
+      $setOnInsert: {
+        createdAt: new Date(),
+        storageQuotaBytes: STORAGE_QUOTA_BYTES,
+        storageUsedBytes: 0,
+      },
+    },
     { upsert: true }
   );
   const user = await users.findOne({ email });
@@ -58,5 +66,12 @@ export async function POST(req: Request) {
 
   const token = await createSession(user._id);
   await setSessionCookie(token);
-  return NextResponse.json({ user: { id: String(user._id), email: user.email } });
+  return NextResponse.json({
+    user: {
+      id: String(user._id),
+      email: user.email,
+      storageQuotaBytes: user.storageQuotaBytes ?? STORAGE_QUOTA_BYTES,
+      storageUsedBytes: user.storageUsedBytes ?? 0,
+    },
+  });
 }
