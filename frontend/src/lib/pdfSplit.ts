@@ -8,6 +8,15 @@ export interface PdfPart {
   partIndex: number;
 }
 
+async function buildPartBytes(src: PDFDocument, start: number, end: number): Promise<Uint8Array> {
+  const partDoc = await PDFDocument.create();
+  const pageIndices = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+  const copied = await partDoc.copyPages(src, pageIndices);
+  copied.forEach((p) => partDoc.addPage(p));
+  return partDoc.save();
+}
+
+/** Greedily pack pages into parts, shrinking ranges until each part is <= 1 MB. */
 export async function splitPdfIntoParts(file: File, onProgress?: (pct: number) => void): Promise<PdfPart[]> {
   const bytes = await file.arrayBuffer();
   onProgress?.(1);
@@ -16,10 +25,10 @@ export async function splitPdfIntoParts(file: File, onProgress?: (pct: number) =
   if (totalPages === 0) return [];
 
   const fileSize = bytes.byteLength;
-  if (fileSize <= SPLIT_TARGET_BYTES) {
+  if (fileSize <= MAX_PART_BYTES) {
     return [
       {
-        blob: new Blob([bytes], { type: "application/pdf" }),
+        blob: new Blob([new Uint8Array(bytes)], { type: "application/pdf" }),
         pageOffset: 0,
         pageCount: totalPages,
         partIndex: 0,
@@ -28,27 +37,37 @@ export async function splitPdfIntoParts(file: File, onProgress?: (pct: number) =
   }
 
   const bytesPerPage = fileSize / totalPages;
-  const pagesPerPart = Math.max(1, Math.floor(SPLIT_TARGET_BYTES / bytesPerPage));
-  const parts: PdfPart[] = [];
-  let partIndex = 0;
+  let guessPages = Math.max(1, Math.floor(SPLIT_TARGET_BYTES / bytesPerPage));
 
-  for (let start = 0; start < totalPages; start += pagesPerPart) {
-    const end = Math.min(start + pagesPerPart - 1, totalPages - 1);
-    const partDoc = await PDFDocument.create();
-    const pageIndices = Array.from({ length: end - start + 1 }, (_, i) => start + i);
-    const copied = await partDoc.copyPages(src, pageIndices);
-    copied.forEach((p) => partDoc.addPage(p));
-    const partBytes = await partDoc.save();
-    if (partBytes.byteLength > MAX_PART_BYTES) {
-      throw new Error("A PDF part exceeded 1 MB. Try a smaller file or fewer images per page.");
+  const parts: PdfPart[] = [];
+  let start = 0;
+
+  while (start < totalPages) {
+    let end = Math.min(start + guessPages - 1, totalPages - 1);
+    let partBytes = await buildPartBytes(src, start, end);
+
+    while (partBytes.byteLength > MAX_PART_BYTES && end > start) {
+      end = start + Math.max(0, Math.floor((end - start) / 2));
+      partBytes = await buildPartBytes(src, start, end);
     }
+
+    if (partBytes.byteLength > MAX_PART_BYTES) {
+      throw new Error(
+        `Page ${start + 1} alone exceeds 1 MB (likely a high-resolution scan). Try compressing the PDF first.`
+      );
+    }
+
     parts.push({
       blob: new Blob([new Uint8Array(partBytes)], { type: "application/pdf" }),
       pageOffset: start,
       pageCount: end - start + 1,
-      partIndex: partIndex++,
+      partIndex: parts.length,
     });
-    onProgress?.((end + 1) / totalPages);
+
+    guessPages = Math.max(1, end - start + 1);
+    start = end + 1;
+    onProgress?.(start / totalPages);
   }
+
   return parts;
 }
