@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { ObjectId } from "mongodb";
 import { getDb } from "@/lib/mongo";
 import { requireOwnedChat } from "@/lib/chatauth";
 import { fastapiFetch } from "@/lib/fastapi";
+import { releaseStorage } from "@/lib/quota";
 
 export const runtime = "nodejs";
 
@@ -35,6 +37,17 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
   if (!gate.ok) return NextResponse.json({ error: gate.error }, { status: gate.status });
 
   const db = await getDb();
+  const docs = await db.collection("documents").find({ chatId: id }).toArray();
+  let released = 0;
+  for (const doc of docs) {
+    if (doc.status === "indexed" || doc.status === "processing") {
+      released += doc.sizeBytes || 0;
+    }
+  }
+  if (released > 0) {
+    await releaseStorage(gate.userId, released);
+  }
+
   // Drop the chat's vector index in FastAPI (best-effort — don't fail the delete if it's down).
   try {
     await fastapiFetch(`/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" });

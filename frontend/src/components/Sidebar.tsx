@@ -92,13 +92,32 @@ export default function Sidebar({
           )}
         </div>
 
-        <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/5 pt-3">
-          <span className="truncate px-1 text-xs text-muted" title={user.email}>
-            {user.email}
-          </span>
-          <button onClick={onLogout} className="flex items-center gap-1 text-xs text-muted hover:text-zinc-200" aria-label="Log out">
-            <LogOut className="h-3.5 w-3.5" /> Logout
-          </button>
+        <div className="mt-3 space-y-2 border-t border-white/5 pt-3">
+          <div className="px-1">
+            <div className="mb-1 flex justify-between text-[10px] text-muted">
+              <span>Storage</span>
+              <span>
+                {Math.round(user.storageUsedBytes / (1024 * 1024))} /{" "}
+                {Math.round(user.storageQuotaBytes / (1024 * 1024))} MB
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full rounded-full bg-violet-500 transition-all"
+                style={{
+                  width: `${Math.min(100, (user.storageUsedBytes / Math.max(user.storageQuotaBytes, 1)) * 100)}%`,
+                }}
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate px-1 text-xs text-muted" title={user.email}>
+              {user.email}
+            </span>
+            <button onClick={onLogout} className="flex items-center gap-1 text-xs text-muted hover:text-zinc-200" aria-label="Log out">
+              <LogOut className="h-3.5 w-3.5" /> Logout
+            </button>
+          </div>
         </div>
       </aside>
     </>

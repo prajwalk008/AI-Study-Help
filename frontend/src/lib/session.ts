@@ -7,9 +7,13 @@ const COOKIE = "recall_session";
 const TTL_DAYS = parseInt(process.env.SESSION_TTL_DAYS || "30", 10);
 const TTL_MS = TTL_DAYS * 24 * 60 * 60 * 1000;
 
+import { STORAGE_QUOTA_BYTES } from "./uploadLimits";
+
 export interface SessionUser {
   id: string;
   email: string;
+  storageQuotaBytes: number;
+  storageUsedBytes: number;
 }
 
 function hashToken(token: string): string {
@@ -56,7 +60,12 @@ export async function getSession(): Promise<SessionUser | null> {
   const user = await db.collection("users").findOne({ _id: session.userId });
   if (!user) return null;
 
-  return { id: String(user._id), email: user.email };
+  return {
+    id: String(user._id),
+    email: user.email,
+    storageQuotaBytes: user.storageQuotaBytes ?? STORAGE_QUOTA_BYTES,
+    storageUsedBytes: user.storageUsedBytes ?? 0,
+  };
 }
 
 export async function destroySession(): Promise<void> {
