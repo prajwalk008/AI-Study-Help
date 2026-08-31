@@ -1,5 +1,5 @@
 import { PDFDocument } from "pdf-lib";
-import { MAX_PART_BYTES, SPLIT_TARGET_BYTES } from "./uploadLimits";
+import { MAX_PART_BYTES, SPLIT_TARGET_BYTES, formatPartLimitMb } from "./uploadLimits";
 
 export interface PdfPart {
   blob: Blob;
@@ -16,7 +16,7 @@ async function buildPartBytes(src: PDFDocument, start: number, end: number): Pro
   return partDoc.save();
 }
 
-/** Greedily pack pages into parts, shrinking ranges until each part is <= 1 MB. */
+/** Greedily pack pages into parts, shrinking ranges until each part is under the size cap. */
 export async function splitPdfIntoParts(file: File, onProgress?: (pct: number) => void): Promise<PdfPart[]> {
   const bytes = await file.arrayBuffer();
   onProgress?.(1);
@@ -52,8 +52,9 @@ export async function splitPdfIntoParts(file: File, onProgress?: (pct: number) =
     }
 
     if (partBytes.byteLength > MAX_PART_BYTES) {
+      const limit = formatPartLimitMb();
       throw new Error(
-        `Page ${start + 1} alone exceeds 1 MB (likely a high-resolution scan). Try compressing the PDF first.`
+        `Page ${start + 1} alone exceeds ${limit} MB (likely a high-resolution scan). Try compressing the PDF first.`
       );
     }
 
