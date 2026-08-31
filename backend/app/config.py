@@ -32,4 +32,14 @@ UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-MAX_UPLOAD_BYTES = 500 * 1024 * 1024
+# Render free tier: browser splits before upload; each part must be <= 1 MB.
+MAX_SEGMENT_BYTES = 1 * 1024 * 1024
+
+# Last N words of each page are prepended to the next page (and carried across parts).
+PAGE_TAIL_WORDS = 120
+
+# Only this many background ingest jobs run at once (extra jobs wait in queue).
+MAX_CONCURRENT_INGESTS = int(os.getenv("MAX_CONCURRENT_INGESTS", "1"))
+
+# Smaller batches = lower peak RAM on 512 MB Render instances.
+INGEST_BATCH_SIZE = int(os.getenv("INGEST_BATCH_SIZE", "50"))
