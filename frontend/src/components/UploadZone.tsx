@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { UploadCloud, Loader2, CheckCircle2, Circle, CheckCircle } from "lucide-react";
 import { uploadPdf, type UploadResult, type UploadUiState, formatMb } from "@/lib/api";
-import { MAX_FILE_BYTES } from "@/lib/uploadLimits";
+import { MAX_FILE_BYTES, formatPartLimitMb } from "@/lib/uploadLimits";
 
 type Status =
   | { kind: "idle" }
@@ -120,7 +120,9 @@ export default function UploadZone({
         ) : (
           <>
             <div className="text-sm font-medium text-zinc-200">Drop a PDF or click to upload</div>
-            <div className="text-xs text-muted">Max {MAX_FILE_BYTES / (1024 * 1024)} MB · split into 1 MB parts</div>
+            <div className="text-xs text-muted">
+              Max {MAX_FILE_BYTES / (1024 * 1024)} MB · split into {formatPartLimitMb()} MB parts
+            </div>
           </>
         )}
       </label>

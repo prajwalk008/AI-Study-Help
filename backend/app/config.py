@@ -32,8 +32,13 @@ UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Render free tier: browser splits before upload; each part must be <= 1 MB.
-MAX_SEGMENT_BYTES = 1 * 1024 * 1024
+def _mb_env(name: str, default_mb: int) -> int:
+    return int(os.getenv(name, str(default_mb))) * 1024 * 1024
+
+
+# Browser splits before upload. Default 5 MB/part for Azure B1 (~1.75 GB RAM).
+# Set MAX_SEGMENT_MB=1 on Render free tier.
+MAX_SEGMENT_BYTES = _mb_env("MAX_SEGMENT_MB", 5)
 
 # Last N words of each page are prepended to the next page (and carried across parts).
 PAGE_TAIL_WORDS = 120
@@ -41,5 +46,5 @@ PAGE_TAIL_WORDS = 120
 # Only this many background ingest jobs run at once (extra jobs wait in queue).
 MAX_CONCURRENT_INGESTS = int(os.getenv("MAX_CONCURRENT_INGESTS", "1"))
 
-# Smaller batches = lower peak RAM on 512 MB Render instances.
-INGEST_BATCH_SIZE = int(os.getenv("INGEST_BATCH_SIZE", "50"))
+# B1 can flush larger batches; use INGEST_BATCH_SIZE=50 on Render free.
+INGEST_BATCH_SIZE = int(os.getenv("INGEST_BATCH_SIZE", "100"))

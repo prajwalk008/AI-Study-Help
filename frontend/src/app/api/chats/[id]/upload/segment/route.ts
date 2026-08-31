@@ -36,7 +36,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   if (file.size > MAX_PART_BYTES) {
-    return NextResponse.json({ error: "PDF part exceeds 1 MB limit." }, { status: 413 });
+    return NextResponse.json(
+      { error: `PDF part exceeds ${MAX_PART_BYTES / (1024 * 1024)} MB limit.` },
+      { status: 413 }
+    );
   }
 
   const db = await getDb();
