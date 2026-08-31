@@ -34,6 +34,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     await db.collection("chats").updateOne({ _id: new ObjectId(id) }, { $set: { updatedAt: new Date() } });
   } else if (job.status === "error") {
     await db.collection("documents").updateOne({ _id: doc._id }, { $set: { status: "error" } });
+    if (doc.status === "processing" && doc.sizeBytes) {
+      const { releaseStorage } = await import("@/lib/quota");
+      await releaseStorage(doc.userId, doc.sizeBytes);
+    }
   }
 
   return NextResponse.json(job);
