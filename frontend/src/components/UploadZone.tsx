@@ -1,28 +1,30 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { UploadCloud, Loader2, CheckCircle2 } from "lucide-react";
-import { uploadPdf, type UploadResult, type UploadProgress } from "@/lib/api";
+import { UploadCloud, Loader2, CheckCircle2, Circle, CheckCircle } from "lucide-react";
+import { uploadPdf, type UploadResult, type UploadUiState, formatMb } from "@/lib/api";
+import { MAX_FILE_BYTES } from "@/lib/uploadLimits";
 
 type Status =
   | { kind: "idle" }
-  | { kind: "uploading" } // file in flight, server not yet reporting
-  | { kind: "processing"; progress: UploadProgress }
+  | { kind: "busy"; ui: UploadUiState }
   | { kind: "done" };
 
 export default function UploadZone({
   chatId,
   onUploaded,
+  onStorageChange,
 }: {
   chatId: string;
   onUploaded: (r: UploadResult) => void;
+  onStorageChange?: (used: number, quota: number) => void;
 }) {
   const [dragging, setDragging] = useState(false);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const busy = status.kind === "uploading" || status.kind === "processing";
+  const busy = status.kind === "busy";
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -31,13 +33,31 @@ export default function UploadZone({
         setError("Please choose a PDF file.");
         return;
       }
-      setStatus({ kind: "uploading" });
+      if (file.size > MAX_FILE_BYTES) {
+        setError(`File too large (max ${MAX_FILE_BYTES / (1024 * 1024)} MB).`);
+        return;
+      }
+
+      setStatus({
+        kind: "busy",
+        ui: {
+          filename: file.name,
+          fileSize: file.size,
+          readDone: false,
+          splitDone: false,
+          totalParts: 0,
+          parts: [],
+          stageLabel: "Reading file from disk…",
+        },
+      });
+
       await uploadPdf(chatId, file, {
-        onProgress: (progress) => setStatus({ kind: "processing", progress }),
-        onDone: (result) => {
+        onUi: (ui) => setStatus({ kind: "busy", ui }),
+        onDone: (result, storage) => {
           setStatus({ kind: "done" });
+          onStorageChange?.(storage.storageUsedBytes, storage.storageQuotaBytes);
           onUploaded(result);
-          setTimeout(() => setStatus({ kind: "idle" }), 1200);
+          setTimeout(() => setStatus({ kind: "idle" }), 1500);
         },
         onError: (message) => {
           setError(message);
@@ -45,11 +65,8 @@ export default function UploadZone({
         },
       });
     },
-    [chatId, onUploaded]
+    [chatId, onUploaded, onStorageChange]
   );
-
-  const pct = status.kind === "processing" ? Math.round(status.progress.pct * 100) : 0;
-  const indeterminate = status.kind === "uploading";
 
   return (
     <div>
@@ -96,33 +113,77 @@ export default function UploadZone({
           <UploadCloud className="h-6 w-6 text-violet-300 transition group-hover:scale-110" />
         )}
 
-        {busy ? (
-          <div className="w-full">
-            <div className="mb-1.5 flex items-center justify-between text-xs">
-              <span className="text-zinc-300">
-                {status.kind === "uploading" ? "Uploading…" : status.progress.stage}
-              </span>
-              {!indeterminate && <span className="font-mono text-violet-300">{pct}%</span>}
-            </div>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
-              <div
-                className={`h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 ${
-                  indeterminate ? "w-1/3 animate-pulse" : "transition-[width] duration-200 ease-out"
-                }`}
-                style={indeterminate ? undefined : { width: `${pct}%` }}
-              />
-            </div>
-          </div>
+        {status.kind === "busy" ? (
+          <UploadStepper ui={status.ui} />
         ) : status.kind === "done" ? (
           <div className="text-sm font-medium text-emerald-300">Indexed!</div>
         ) : (
           <>
             <div className="text-sm font-medium text-zinc-200">Drop a PDF or click to upload</div>
-            <div className="text-xs text-muted">Notes, textbooks, papers</div>
+            <div className="text-xs text-muted">Max {MAX_FILE_BYTES / (1024 * 1024)} MB · split into 1 MB parts</div>
           </>
         )}
       </label>
       {error && <p className="mt-2 text-xs text-rose-400">{error}</p>}
     </div>
   );
+}
+
+function UploadStepper({ ui }: { ui: UploadUiState }) {
+  return (
+    <div className="w-full space-y-2 text-left text-xs">
+      <div className="font-medium text-zinc-200">
+        {ui.filename} · {formatMb(ui.fileSize)}
+      </div>
+
+      <Step done={ui.readDone} label="Read file from disk" active={!ui.readDone} />
+      <Step done={ui.splitDone} label={ui.splitDone ? `Split into ${ui.totalParts} parts` : "Split PDF into parts"} active={ui.readDone && !ui.splitDone} />
+
+      {ui.parts.length > 0 && (
+        <div className="mt-2 space-y-1 rounded-lg bg-white/5 p-2">
+          {ui.parts.map((p) => (
+            <div key={p.index} className="flex items-start gap-2 text-zinc-300">
+              <PartIcon phase={p.phase} />
+              <div className="min-w-0 flex-1">
+                <div>Part {p.index + 1}</div>
+                {p.phase === "uploading" && <div className="text-muted">Uploading…</div>}
+                {p.phase === "processing" && (
+                  <div className="flex items-center gap-1 text-muted">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    {p.detail || "Processing…"}
+                  </div>
+                )}
+                {p.phase === "done" && <div className="text-emerald-400/90">Indexed</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="text-muted">{ui.stageLabel}</div>
+    </div>
+  );
+}
+
+function Step({ done, label, active }: { done: boolean; label: string; active: boolean }) {
+  return (
+    <div className="flex items-center gap-2 text-zinc-300">
+      {done ? (
+        <CheckCircle className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+      ) : active ? (
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-300" />
+      ) : (
+        <Circle className="h-3.5 w-3.5 shrink-0 text-muted" />
+      )}
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function PartIcon({ phase }: { phase: string }) {
+  if (phase === "done") return <CheckCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />;
+  if (phase === "processing" || phase === "uploading") {
+    return <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-violet-300" />;
+  }
+  return <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted" />;
 }

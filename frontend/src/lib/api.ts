@@ -3,6 +3,8 @@
 export interface User {
   id: string;
   email: string;
+  storageQuotaBytes: number;
+  storageUsedBytes: number;
 }
 
 export interface Source {
@@ -36,9 +38,22 @@ export interface Message {
   status?: string;
 }
 
-export interface UploadProgress {
-  stage: string;
-  pct: number;
+export type PartPhase = "pending" | "uploading" | "processing" | "done" | "error";
+
+export interface UploadPartState {
+  index: number;
+  phase: PartPhase;
+  detail?: string;
+}
+
+export interface UploadUiState {
+  filename: string;
+  fileSize: number;
+  readDone: boolean;
+  splitDone: boolean;
+  totalParts: number;
+  parts: UploadPartState[];
+  stageLabel: string;
 }
 
 export interface UploadResult {
@@ -49,7 +64,7 @@ export interface UploadResult {
 
 async function parseJson(res: Response) {
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) throw new Error(data.error || data.detail || `Request failed (${res.status})`);
   return data;
 }
 
@@ -126,46 +141,36 @@ async function readNdjson(res: Response, onEvent: (evt: Record<string, unknown>)
   }
 }
 
-const UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
-
-async function postChunkWithRetry(chatId: string, form: FormData): Promise<void> {
-  for (let attempt = 1; ; attempt++) {
-    const res = await fetch(`/api/chats/${chatId}/upload/chunk`, { method: "POST", body: form });
-    if (res.ok) return;
-    if (attempt >= 2) {
-      const err = await res.json().catch(() => ({ error: "Upload failed" }));
-      throw new Error(err.error || "Upload failed");
-    }
-  }
-}
-
 const STATUS_POLL_MS = 1500;
 
-async function pollUploadStatus(
+function formatMb(bytes: number) {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function releaseQuota(uploadId: string) {
+  await fetch("/api/quota/release", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uploadId }),
+  }).catch(() => {});
+}
+
+async function pollUntilSegmentDone(
   chatId: string,
   docId: string,
-  handlers: {
-    onProgress: (p: UploadProgress) => void;
-    onDone: (r: UploadResult) => void;
-    onError: (message: string) => void;
-  }
-): Promise<void> {
+  segmentIndex: number,
+  onDetail: (detail: string) => void
+): Promise<UploadResult> {
   for (;;) {
     const res = await fetch(`/api/chats/${chatId}/upload/status?docId=${encodeURIComponent(docId)}`);
     const job = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      handlers.onError(job.error || "Status check failed");
-      return;
+    if (!res.ok) throw new Error(job.error || "Status check failed");
+    if (job.status === "error") throw new Error(job.error || "Failed to ingest PDF.");
+    if (job.stage) onDetail(job.stage);
+    if ((job.completed_segments ?? 0) > segmentIndex) {
+      if (job.status === "done" && job.stats) return job.stats as UploadResult;
+      return { doc_name: "", chunks: 0, pages: 0 };
     }
-    if (job.status === "done") {
-      handlers.onDone(job.stats as UploadResult);
-      return;
-    }
-    if (job.status === "error") {
-      handlers.onError(job.error || "Failed to ingest PDF.");
-      return;
-    }
-    handlers.onProgress({ stage: job.stage ?? "Processing", pct: job.pct ?? 0 });
     await new Promise((r) => setTimeout(r, STATUS_POLL_MS));
   }
 }
@@ -174,41 +179,132 @@ export async function uploadPdf(
   chatId: string,
   file: File,
   handlers: {
-    onProgress: (p: UploadProgress) => void;
-    onDone: (r: UploadResult) => void;
+    onUi: (state: UploadUiState) => void;
+    onDone: (r: UploadResult, storage: { storageUsedBytes: number; storageQuotaBytes: number }) => void;
     onError: (message: string) => void;
   }
 ): Promise<void> {
-  try {
-    const uploadId = crypto.randomUUID();
-    const total = Math.max(1, Math.ceil(file.size / UPLOAD_CHUNK_BYTES));
+  const uploadId = crypto.randomUUID();
+  let docId = "";
 
-    for (let index = 0; index < total; index++) {
-      const slice = file.slice(index * UPLOAD_CHUNK_BYTES, (index + 1) * UPLOAD_CHUNK_BYTES);
-      const form = new FormData();
-      form.append("uploadId", uploadId);
-      form.append("index", String(index));
-      form.append("total", String(total));
-      form.append("fileSize", String(file.size));
-      form.append("filename", file.name);
-      form.append("chunk", slice, file.name);
-      await postChunkWithRetry(chatId, form);
-      handlers.onProgress({ stage: "Uploading", pct: (index + 1) / total });
+  const patch = (partial: Partial<UploadUiState> & { parts?: UploadPartState[] }) => {
+    handlers.onUi({ ...ui, ...partial, parts: partial.parts ?? ui.parts });
+  };
+
+  let ui: UploadUiState = {
+    filename: file.name,
+    fileSize: file.size,
+    readDone: false,
+    splitDone: false,
+    totalParts: 0,
+    parts: [],
+    stageLabel: "Reading file from disk…",
+  };
+  handlers.onUi(ui);
+
+  try {
+    const { splitPdfIntoParts } = await import("./pdfSplit");
+    const { MAX_FILE_BYTES } = await import("./uploadLimits");
+
+    if (file.size > MAX_FILE_BYTES) {
+      throw new Error(`File too large (max ${MAX_FILE_BYTES / (1024 * 1024)} MB).`);
     }
 
-    const res = await fetch(`/api/chats/${chatId}/upload/finish`, {
+    ui = { ...ui, readDone: true, stageLabel: "Splitting PDF into parts…" };
+    handlers.onUi(ui);
+
+    const parts = await splitPdfIntoParts(file);
+    if (parts.length === 0) throw new Error("PDF has no pages.");
+
+    const partStates: UploadPartState[] = parts.map((p) => ({
+      index: p.partIndex,
+      phase: "pending",
+    }));
+    ui = {
+      ...ui,
+      splitDone: true,
+      totalParts: parts.length,
+      parts: partStates,
+      stageLabel: `Split into ${parts.length} part${parts.length === 1 ? "" : "s"}`,
+    };
+    handlers.onUi(ui);
+
+    const reserveRes = await fetch("/api/quota/reserve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uploadId, filename: file.name, total }),
+      body: JSON.stringify({
+        chatId,
+        filename: file.name,
+        fileSize: file.size,
+        uploadId,
+      }),
     });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      handlers.onError(body.error || "Upload failed");
-      return;
+    const reserveBody = await reserveRes.json().catch(() => ({}));
+    if (!reserveRes.ok) throw new Error(reserveBody.error || "Could not reserve storage.");
+
+    let storage = {
+      storageUsedBytes: reserveBody.storageUsedBytes as number,
+      storageQuotaBytes: reserveBody.storageQuotaBytes as number,
+    };
+
+    const totalPages = parts.reduce((n, p) => n + p.pageCount, 0);
+
+    for (const part of parts) {
+      partStates[part.partIndex] = { index: part.partIndex, phase: "uploading" };
+      patch({
+        stageLabel: `Uploading part ${part.partIndex + 1} of ${parts.length}`,
+        parts: [...partStates],
+      });
+
+      const form = new FormData();
+      form.append("uploadId", uploadId);
+      form.append("filename", file.name);
+      form.append("segmentIndex", String(part.partIndex));
+      form.append("totalSegments", String(parts.length));
+      form.append("pageOffset", String(part.pageOffset));
+      form.append("totalPages", String(totalPages));
+      if (docId) form.append("docId", docId);
+      form.append("file", part.blob, `${file.name}.part${part.partIndex + 1}.pdf`);
+
+      const segRes = await fetch(`/api/chats/${chatId}/upload/segment`, { method: "POST", body: form });
+      const segBody = await segRes.json().catch(() => ({}));
+      if (!segRes.ok) throw new Error(segBody.error || "Part upload failed.");
+
+      docId = segBody.docId as string;
+      partStates[part.partIndex] = { index: part.partIndex, phase: "processing", detail: "Starting…" };
+      patch({
+        stageLabel: `Processing part ${part.partIndex + 1} of ${parts.length}`,
+        parts: [...partStates],
+      });
+
+      await pollUntilSegmentDone(chatId, docId, part.partIndex, (detail) => {
+        partStates[part.partIndex] = { index: part.partIndex, phase: "processing", detail };
+        patch({ parts: [...partStates] });
+      });
+
+      partStates[part.partIndex] = { index: part.partIndex, phase: "done" };
+      patch({ parts: [...partStates] });
     }
-    await pollUploadStatus(chatId, body.docId as string, handlers);
+
+    const finalRes = await fetch(`/api/chats/${chatId}/upload/status?docId=${encodeURIComponent(docId)}`);
+    const finalJob = await finalRes.json().catch(() => ({}));
+    if (!finalRes.ok || finalJob.status !== "done") {
+      throw new Error(finalJob.error || "Indexing did not complete.");
+    }
+
+    const me = await getMe();
+    if (me) {
+      storage = {
+        storageUsedBytes: me.storageUsedBytes,
+        storageQuotaBytes: me.storageQuotaBytes,
+      };
+    }
+
+    patch({ stageLabel: `Indexed — ${finalJob.stats.pages} pages · ${finalJob.stats.chunks} chunks` });
+    handlers.onDone(finalJob.stats as UploadResult, storage);
   } catch (e) {
-    handlers.onError(e instanceof Error ? e.message : "Network error");
+    await releaseQuota(uploadId);
+    handlers.onError(e instanceof Error ? e.message : "Upload failed");
   }
 }
 
@@ -242,3 +338,5 @@ export async function streamChat(
     handlers.onError(e instanceof Error ? e.message : "Network error");
   }
 }
+
+export { formatMb };
