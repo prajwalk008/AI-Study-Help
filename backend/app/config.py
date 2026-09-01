@@ -11,10 +11,12 @@ EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 # Shared secret required on every RAG endpoint (Next.js sends it server-side).
 INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
 
-# Qdrant Cloud: vector storage (shared collection, isolated per chat via a payload filter).
-QDRANT_URL = os.getenv("QDRANT_URL", "")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
+# Vector storage (shared collection, isolated per chat via a payload filter).
+# Azure B1: startup.sh runs Qdrant on /home/qdrant/storage and defaults to localhost.
+QDRANT_URL = os.getenv("QDRANT_URL", "http://127.0.0.1:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "") or None
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "chunks")
+QDRANT_ON_DISK = os.getenv("QDRANT_ON_DISK", "true").lower() in ("1", "true", "yes")
 
 # RAG tuning knobs
 CHUNK_SIZE_WORDS = 380
