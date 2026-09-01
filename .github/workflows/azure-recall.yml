@@ -6,8 +6,11 @@ name: Build and deploy Python app to Azure Web App - recall
 on:
   push:
     branches:
-      - master
+      - azure-deploy
   workflow_dispatch:
+
+env:
+  AZURE_WEBAPP_NAME: recall
 
 jobs:
   build:
@@ -31,6 +34,9 @@ jobs:
           python -m venv antenv
           source antenv/bin/activate
           pip install -r requirements.txt
+
+      - name: Remove local venv from artifact
+        run: rm -rf antenv
 
       - name: Upload backend artifact
         uses: actions/upload-artifact@v4
@@ -58,7 +64,48 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_BADFC33E6A374C58BCFCAD4C18B00BE3 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_66CCF02270624906873F40CD43A9373A }}
 
+      - name: Configure App Service for Oryx build + startup
+        run: |
+          RG="$(az webapp list --query "[?name=='${{ env.AZURE_WEBAPP_NAME }}'].resourceGroup | [0]" -o tsv)"
+          if [ -z "$RG" ] || [ "$RG" = "null" ]; then
+            echo "Could not resolve resource group for app ${{ env.AZURE_WEBAPP_NAME }}" >&2
+            exit 1
+          fi
+          echo "Using resource group: $RG"
+          az webapp config appsettings set \
+            --resource-group "$RG" \
+            --name "${{ env.AZURE_WEBAPP_NAME }}" \
+            --settings \
+              SCM_DO_BUILD_DURING_DEPLOYMENT=true \
+              WEBSITES_ENABLE_APP_SERVICE_STORAGE=true \
+              WEBSITES_PORT=8000 \
+              QDRANT_URL=http://127.0.0.1:6333 \
+              QDRANT_ON_DISK=true
+          az webapp config set \
+            --resource-group "$RG" \
+            --name "${{ env.AZURE_WEBAPP_NAME }}" \
+            --startup-file 'bash $APP_PATH/startup.sh' \
+            --always-on true
+
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
-          app-name: recall
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          package: .
+          startup-command: 'bash $APP_PATH/startup.sh'
+
+      - name: Smoke test health endpoint
+        run: |
+          URL="https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/api/health"
+          echo "Waiting for $URL ..."
+          for i in $(seq 1 30); do
+            if curl -sf "$URL"; then
+              echo ""
+              echo "Health check passed."
+              exit 0
+            fi
+            echo "Attempt $i/30 — not ready yet"
+            sleep 20
+          done
+          echo "Health check timed out. Check App Service logs." >&2
+          exit 1
