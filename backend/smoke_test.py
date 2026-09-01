@@ -1,4 +1,4 @@
-"""Quick check that embed -> Qdrant -> retrieve works. Needs QDRANT_URL/QDRANT_API_KEY set."""
+"""Quick check that embed -> Qdrant -> retrieve works. Needs Qdrant at QDRANT_URL."""
 import uuid
 
 from app import embeddings
