@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from . import config, jobs, store_manager
 from .llm import stream_chat
 from .rag import RAGEngine
+from .vectorstore import qdrant_ready
 
 app = FastAPI(title="Recall RAG service", version="2.0")
 
@@ -37,7 +38,7 @@ class ChatRequest(BaseModel):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "qdrant": qdrant_ready()}
 
 
 @app.get("/api/documents", dependencies=[Depends(require_secret)])

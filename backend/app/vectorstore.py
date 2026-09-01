@@ -9,6 +9,7 @@ from qdrant_client.http.models import (
     FieldCondition,
     Filter,
     FilterSelector,
+    HnswConfigDiff,
     MatchValue,
     PayloadSchemaType,
     PointStruct,
@@ -19,7 +20,7 @@ from . import config
 from .ingest import Chunk
 
 _ID_NAMESPACE = uuid.UUID("12345678-1234-5678-1234-567812345678")
-_UPSERT_BATCH_SIZE = 20  # this cluster writes ~0.2s/point, keep batches well under the client timeout
+_UPSERT_BATCH_SIZE = 20  # keep batches small so upserts stay under the client timeout
 
 _client: QdrantClient | None = None
 
@@ -27,18 +28,32 @@ _client: QdrantClient | None = None
 def _get_client() -> QdrantClient:
     global _client
     if _client is None:
-        # default REST timeout is 5s, too tight for a round trip to a distant cluster
         _client = QdrantClient(url=config.QDRANT_URL, api_key=config.QDRANT_API_KEY, timeout=30)
         _ensure_collection(_client)
     return _client
 
 
+def qdrant_ready() -> bool:
+    try:
+        _get_client().get_collections()
+        return True
+    except Exception:
+        return False
+
+
 def _ensure_collection(client: QdrantClient) -> None:
     if client.collection_exists(config.QDRANT_COLLECTION):
         return
+    on_disk = config.QDRANT_ON_DISK
     client.create_collection(
         collection_name=config.QDRANT_COLLECTION,
-        vectors_config=VectorParams(size=config.EMBED_DIM, distance=Distance.COSINE),
+        vectors_config=VectorParams(
+            size=config.EMBED_DIM,
+            distance=Distance.COSINE,
+            on_disk=on_disk,
+        ),
+        hnsw_config=HnswConfigDiff(on_disk=on_disk),
+        on_disk_payload=on_disk,
     )
     # needed so filtering by chat_id doesn't scan the whole collection
     client.create_payload_index(

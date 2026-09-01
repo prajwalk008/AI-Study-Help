@@ -6,6 +6,7 @@ name: Build and deploy Python app to Azure Web App - recall
 on:
   push:
     branches:
+      - azure-deploy
       - master
   workflow_dispatch:
 
