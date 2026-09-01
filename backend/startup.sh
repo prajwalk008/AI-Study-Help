@@ -1,26 +1,44 @@
 #!/usr/bin/env bash
 # Azure App Service (B1 Linux): run local Qdrant on persistent /home storage, then FastAPI.
 #
-# Portal → Configuration → Startup Command (Oryx extracts app to $APP_PATH, NOT wwwroot):
+# Portal / workflow startup command:
 #   bash $APP_PATH/startup.sh
 #
-# Recommended app settings:
-#   WEBSITES_ENABLE_APP_SERVICE_STORAGE=true
+# Required app settings (workflow sets these):
 #   SCM_DO_BUILD_DURING_DEPLOYMENT=true
+#   WEBSITES_ENABLE_APP_SERVICE_STORAGE=true
 #   QDRANT_URL=http://127.0.0.1:6333
-#   (leave QDRANT_API_KEY empty for localhost)
 
 set -euo pipefail
 
-# Oryx deploys to /tmp/<id>/ (see $APP_PATH); wwwroot only holds output.tar.zst.
-if [ -n "${APP_PATH:-}" ] && [ -f "${APP_PATH}/app/main.py" ]; then
-  APP_ROOT="$APP_PATH"
-elif [ -f "./app/main.py" ]; then
-  APP_ROOT="$(pwd)"
-else
-  APP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-fi
+log() { echo "[startup] $*"; }
+
+resolve_app_root() {
+  if [ -n "${APP_PATH:-}" ] && [ -f "${APP_PATH}/app/main.py" ]; then
+    echo "$APP_PATH"
+    return
+  fi
+  if [ -f "./app/main.py" ]; then
+    pwd
+    return
+  fi
+  if [ -f "/home/site/wwwroot/app/main.py" ]; then
+    echo "/home/site/wwwroot"
+    return
+  fi
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -f "${script_dir}/app/main.py" ]; then
+    echo "$script_dir"
+    return
+  fi
+  log "ERROR: could not locate app/main.py (APP_PATH=${APP_PATH:-unset}, pwd=$(pwd))" >&2
+  exit 1
+}
+
+APP_ROOT="$(resolve_app_root)"
 cd "$APP_ROOT"
+log "APP_ROOT=$APP_ROOT"
 
 QDRANT_VERSION="${QDRANT_VERSION:-1.13.2}"
 QDRANT_BIN_DIR="${QDRANT_BIN_DIR:-/home/qdrant/bin}"
@@ -36,7 +54,7 @@ install_qdrant() {
     x86_64) qdrant_arch="x86_64" ;;
     aarch64|arm64) qdrant_arch="aarch64" ;;
     *)
-      echo "Unsupported CPU architecture for Qdrant: $arch" >&2
+      log "ERROR: unsupported CPU architecture for Qdrant: $arch" >&2
       exit 1
       ;;
   esac
@@ -45,7 +63,7 @@ install_qdrant() {
   url="https://github.com/qdrant/qdrant/releases/download/v${QDRANT_VERSION}/${tarball}"
   tmp_dir="$(mktemp -d)"
 
-  echo "Downloading Qdrant v${QDRANT_VERSION} (${qdrant_arch})..."
+  log "Downloading Qdrant v${QDRANT_VERSION} (${qdrant_arch})..."
   curl -fsSL "$url" -o "${tmp_dir}/${tarball}"
   tar -xzf "${tmp_dir}/${tarball}" -C "$QDRANT_BIN_DIR"
   chmod +x "${QDRANT_BIN_DIR}/qdrant"
@@ -65,7 +83,7 @@ if [ -n "${QDRANT_API_KEY:-}" ]; then
   export QDRANT__SERVICE__API_KEY="$QDRANT_API_KEY"
 fi
 
-echo "Starting Qdrant (storage: ${QDRANT_STORAGE})..."
+log "Starting Qdrant (storage: ${QDRANT_STORAGE})..."
 "${QDRANT_BIN_DIR}/qdrant" &
 QDRANT_PID=$!
 
@@ -78,32 +96,51 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 ready=0
-for _ in $(seq 1 45); do
+for i in $(seq 1 60); do
   if curl -sf "http://${QDRANT_HOST}:${QDRANT_PORT}/readiness" >/dev/null; then
     ready=1
     break
   fi
   if ! kill -0 "$QDRANT_PID" 2>/dev/null; then
-    echo "Qdrant exited before becoming ready." >&2
+    log "ERROR: Qdrant exited before becoming ready." >&2
     exit 1
+  fi
+  if [ "$i" -eq 1 ] || [ $((i % 10)) -eq 0 ]; then
+    log "Waiting for Qdrant readiness (${i}/60)..."
   fi
   sleep 1
 done
 
 if [ "$ready" -ne 1 ]; then
-  echo "Timed out waiting for Qdrant readiness." >&2
+  log "ERROR: timed out waiting for Qdrant readiness." >&2
   exit 1
 fi
 
-echo "Qdrant is ready."
+log "Qdrant is ready."
 
-if [ -f "$APP_ROOT/antenv/bin/activate" ]; then
-  # shellcheck disable=SC1091
-  source "$APP_ROOT/antenv/bin/activate"
+PYTHON=""
+for candidate in \
+  "$APP_ROOT/antenv/bin/python" \
+  "$APP_ROOT/venv/bin/python" \
+  "$(command -v python3 || true)" \
+  "$(command -v python || true)"
+do
+  if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+    PYTHON="$candidate"
+    break
+  fi
+done
+
+if [ -z "$PYTHON" ]; then
+  log "ERROR: no Python interpreter found." >&2
+  ls -la "$APP_ROOT" >&2 || true
+  exit 1
 fi
+
+log "Using Python: $PYTHON ($("$PYTHON" --version 2>&1))"
 
 export QDRANT_URL="${QDRANT_URL:-http://${QDRANT_HOST}:${QDRANT_PORT}}"
 PORT="${PORT:-8000}"
 
-echo "Starting FastAPI on port ${PORT}..."
-exec python -m uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --workers 1
+log "Starting FastAPI on port ${PORT}..."
+exec "$PYTHON" -m uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --workers 1
