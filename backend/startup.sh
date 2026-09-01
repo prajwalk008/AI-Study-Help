@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
 # Azure App Service (B1 Linux): run local Qdrant on persistent /home storage, then FastAPI.
 #
-# Portal → Configuration → Startup Command (use full path — Oryx cwd is not wwwroot):
-#   bash /home/site/wwwroot/startup.sh
+# Portal → Configuration → Startup Command (Oryx extracts app to $APP_PATH, NOT wwwroot):
+#   bash $APP_PATH/startup.sh
 #
 # Recommended app settings:
 #   WEBSITES_ENABLE_APP_SERVICE_STORAGE=true
+#   SCM_DO_BUILD_DURING_DEPLOYMENT=true
 #   QDRANT_URL=http://127.0.0.1:6333
 #   (leave QDRANT_API_KEY empty for localhost)
 
 set -euo pipefail
 
-APP_ROOT="$(cd "$(dirname "$0")" && pwd)"
+# Oryx deploys to /tmp/<id>/ (see $APP_PATH); wwwroot only holds output.tar.zst.
+if [ -n "${APP_PATH:-}" ] && [ -f "${APP_PATH}/app/main.py" ]; then
+  APP_ROOT="$APP_PATH"
+elif [ -f "./app/main.py" ]; then
+  APP_ROOT="$(pwd)"
+else
+  APP_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 cd "$APP_ROOT"
 
 QDRANT_VERSION="${QDRANT_VERSION:-1.13.2}"
