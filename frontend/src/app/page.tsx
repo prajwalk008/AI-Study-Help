@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Sparkles, FileText, Plus, Loader2, Menu } from "lucide-react";
-import Sidebar from "@/components/Sidebar";
+import { FileText, Plus, Loader2 } from "lucide-react";
+import Sidebar, { MobileMenuButton } from "@/components/Sidebar";
 import LoginView from "@/components/LoginView";
 import UploadZone from "@/components/UploadZone";
 import ChatMessage, { type ChatMsg } from "@/components/ChatMessage";
@@ -36,7 +36,6 @@ export default function Home() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Initial auth check.
   useEffect(() => {
     getMe()
       .then(async (u) => {
@@ -46,7 +45,6 @@ export default function Home() {
       .finally(() => setAuthLoading(false));
   }, []);
 
-  // Load a chat's messages + documents when it becomes active.
   useEffect(() => {
     if (!activeChatId) return;
     Promise.all([getMessages(activeChatId), getChatDocuments(activeChatId)]).then(([msgs, docs]) => {
@@ -56,7 +54,6 @@ export default function Home() {
     });
   }, [activeChatId]);
 
-  // clears the active chat and its loaded messages/documents together
   const selectChat = (id: string | null) => {
     setActiveChatId(id);
     if (!id) {
@@ -106,7 +103,7 @@ export default function Home() {
       {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: `✅ Indexed **${r.doc_name}** — ${r.pages} page${r.pages > 1 ? "s" : ""}, ${r.chunks} chunk${r.chunks > 1 ? "s" : ""}. Ask me anything about it!`,
+        content: `Indexed **${r.doc_name}** — ${r.pages} page${r.pages > 1 ? "s" : ""}, ${r.chunks} chunk${r.chunks > 1 ? "s" : ""}. Ask me anything about it.`,
       },
     ]);
     refreshChats();
@@ -134,7 +131,7 @@ export default function Home() {
           refreshChats();
         },
         onError: (message: string) => {
-          patch((p) => ({ ...p, content: `⚠️ ${message}`, streaming: false }));
+          patch((p) => ({ ...p, content: message, streaming: false }));
           setThinking(false);
         },
       });
@@ -144,8 +141,8 @@ export default function Home() {
 
   if (authLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-violet-300" />
+      <div className="flex min-h-screen items-center justify-center bg-[var(--bg)]">
+        <Loader2 className="h-5 w-5 animate-spin text-[var(--muted)]" />
       </div>
     );
   }
@@ -155,15 +152,7 @@ export default function Home() {
   const hasDocs = documents.length > 0;
 
   return (
-    <div className="flex h-screen">
-      <button
-        onClick={() => setMobileNavOpen(true)}
-        className="glass fixed left-4 top-4 z-30 flex h-9 w-9 items-center justify-center rounded-xl text-zinc-200 md:hidden"
-        aria-label="Open menu"
-      >
-        <Menu className="h-4 w-4" />
-      </button>
-
+    <div className="flex h-screen bg-[var(--bg)]">
       <Sidebar
         chats={chats}
         activeChatId={activeChatId}
@@ -176,77 +165,84 @@ export default function Home() {
         onLogout={handleLogout}
       />
 
-      <main className="flex flex-1 flex-col">
+      <main className="relative flex min-w-0 flex-1 flex-col">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 md:px-4">
+          <MobileMenuButton onClick={() => setMobileNavOpen(true)} />
+          <div className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--text)]">
+            {activeChatId
+              ? chats.find((c) => c.id === activeChatId)?.title || "Chat"
+              : "Recall"}
+          </div>
+          {activeChatId && (
+            <button
+              onClick={() => setShowUpload((s) => !s)}
+              className="shrink-0 rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text)] hover:bg-[var(--surface)]"
+            >
+              {showUpload ? "Close" : "Add PDF"}
+            </button>
+          )}
+        </header>
+
         {!activeChatId ? (
           <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
-            <div className="gradient-btn mb-5 flex h-14 w-14 items-center justify-center rounded-2xl">
-              <Sparkles className="h-7 w-7 text-white" />
-            </div>
-            <h1 className="text-2xl font-semibold tracking-tight">Start a new chat</h1>
-            <p className="mt-2 max-w-sm text-sm text-muted">
-              Each chat has its own books and context. Create one, upload a PDF, and ask away.
+            <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)]">What can I help with?</h1>
+            <p className="mt-2 max-w-sm text-sm text-[var(--muted)]">
+              Create a chat, upload a PDF, and ask questions with page citations.
             </p>
             <button
               onClick={handleNewChat}
-              className="gradient-btn mt-6 flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-medium text-white"
+              className="mt-6 flex items-center gap-2 rounded-full bg-[var(--send)] px-5 py-2.5 text-sm font-medium text-white hover:opacity-90"
             >
               <Plus className="h-4 w-4" /> New chat
             </button>
           </div>
         ) : (
           <>
-            {/* Header: documents + add PDF */}
-            <div className="flex items-center justify-between gap-3 border-b border-white/5 py-3 pl-14 pr-5 md:px-5">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                {documents.map((d) => (
-                  <span key={d.id} className="glass flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs text-zinc-300">
-                    <FileText className="h-3.5 w-3.5 text-violet-300" />
-                    <span className="max-w-[180px] truncate">{d.docName}</span>
-                    <span className="text-muted">· p{d.pages}</span>
-                  </span>
-                ))}
-                {documents.length === 0 && <span className="text-xs text-muted">No documents in this chat yet</span>}
-              </div>
-              <button
-                onClick={() => setShowUpload((s) => !s)}
-                className="shrink-0 rounded-lg border border-white/10 px-3 py-1.5 text-xs text-zinc-200 hover:bg-white/5"
-              >
-                {showUpload ? "Close" : "+ Add PDF"}
-              </button>
-            </div>
-
-            {showUpload && (
-              <div className="border-b border-white/5 p-4">
-                <div className="mx-auto max-w-md">
-                  <UploadZone
-                    chatId={activeChatId}
-                    onUploaded={onUploaded}
-                    onStorageChange={(used, quota) =>
-                      setUser((u) => (u ? { ...u, storageUsedBytes: used, storageQuotaBytes: quota } : u))
-                    }
-                  />
+            {(showUpload || documents.length > 0) && (
+              <div className="border-b border-[var(--border)] px-4 py-3">
+                <div className="mx-auto max-w-3xl">
+                  {documents.length > 0 && (
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      {documents.map((d) => (
+                        <span
+                          key={d.id}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-xs text-[var(--text)]"
+                        >
+                          <FileText className="h-3.5 w-3.5 text-[var(--muted)]" />
+                          <span className="max-w-[180px] truncate">{d.docName}</span>
+                          <span className="text-[var(--muted)]">p{d.pages}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {showUpload && (
+                    <UploadZone
+                      chatId={activeChatId}
+                      onUploaded={onUploaded}
+                      onStorageChange={(used, quota) =>
+                        setUser((u) => (u ? { ...u, storageUsedBytes: used, storageQuotaBytes: quota } : u))
+                      }
+                    />
+                  )}
                 </div>
               </div>
             )}
 
             <div ref={scrollRef} className="flex-1 overflow-y-auto">
-              <div className="mx-auto max-w-3xl px-4 py-8">
+              <div className="mx-auto max-w-3xl px-4 py-6">
                 {messages.length === 0 ? (
-                  <div className="flex flex-col items-center pt-10 text-center">
-                    <div className="gradient-btn mb-4 flex h-12 w-12 items-center justify-center rounded-2xl">
-                      <Sparkles className="h-6 w-6 text-white" />
-                    </div>
-                    <h2 className="text-xl font-semibold tracking-tight">
+                  <div className="flex flex-col items-center pt-16 text-center">
+                    <h2 className="text-xl font-semibold tracking-tight text-[var(--text)]">
                       {hasDocs ? "Ask anything about your documents" : "Upload a PDF to begin"}
                     </h2>
-                    <p className="mt-2 max-w-sm text-sm text-muted">
+                    <p className="mt-2 max-w-sm text-sm text-[var(--muted)]">
                       {hasDocs
-                        ? "Answers come with citations to the exact page."
-                        : "Use “+ Add PDF” above to add a book or notes to this chat."}
+                        ? "Answers include citations to the source page."
+                        : "Use Add PDF above to add notes or a textbook to this chat."}
                     </p>
                   </div>
                 ) : (
-                  <div className="flex flex-col gap-6">
+                  <div className="flex flex-col gap-6 pb-4">
                     {messages.map((msg) => (
                       <ChatMessage key={msg.id} msg={msg} />
                     ))}
@@ -255,12 +251,12 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="border-t border-white/5 p-4">
+            <div className="px-4 pb-4 pt-2">
               <div className="mx-auto max-w-3xl">
                 <Composer onSend={handleSend} disabled={thinking || !hasDocs} />
-                <p className="mt-2 text-center text-[11px] text-muted">
+                <p className="mt-2 text-center text-[11px] text-[var(--muted)]">
                   {hasDocs
-                    ? "Answers are generated from this chat's documents · Groq Llama-3.3"
+                    ? "Answers are based on this chat’s documents"
                     : "Add a PDF to this chat to start asking questions"}
                 </p>
               </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowUp } from "lucide-react";
 
 export default function Composer({
@@ -11,6 +11,14 @@ export default function Composer({
   disabled: boolean;
 }) {
   const [value, setValue] = useState("");
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [value]);
 
   const send = () => {
     const q = value.trim();
@@ -20,28 +28,32 @@ export default function Composer({
   };
 
   return (
-    <div className="glass flex items-end gap-2 rounded-2xl p-2">
-      <textarea
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            send();
-          }
-        }}
-        rows={1}
-        placeholder="Ask anything about your documents…"
-        className="max-h-40 flex-1 resize-none bg-transparent px-3 py-2 text-sm text-zinc-100 placeholder:text-muted focus:outline-none"
-      />
-      <button
-        onClick={send}
-        disabled={disabled || !value.trim()}
-        className="gradient-btn flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white disabled:cursor-not-allowed"
-        aria-label="Send"
-      >
-        <ArrowUp className="h-4 w-4" />
-      </button>
+    <div className="rounded-[28px] border border-[var(--composer-border)] bg-[var(--composer)] shadow-[0_0_0_0_transparent] focus-within:border-[#b4b4b4]">
+      <div className="flex items-end gap-2 px-3 py-2.5">
+        <textarea
+          ref={ref}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
+          rows={1}
+          placeholder={disabled ? "Upload a PDF to start asking…" : "Ask anything"}
+          disabled={disabled}
+          className="max-h-40 min-h-[28px] flex-1 resize-none bg-transparent px-1 py-1.5 text-[15px] leading-6 text-[var(--text)] outline-none placeholder:text-[var(--muted)] disabled:cursor-not-allowed"
+        />
+        <button
+          onClick={send}
+          disabled={disabled || !value.trim()}
+          className="mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--send)] text-white disabled:cursor-not-allowed disabled:bg-[#d9d9d9]"
+          aria-label="Send"
+        >
+          <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
+        </button>
+      </div>
     </div>
   );
 }

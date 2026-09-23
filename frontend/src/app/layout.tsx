@@ -6,9 +6,8 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Recall — AI Study Assistant",
-  description:
-    "Upload your notes and textbooks, then ask questions and get citation-backed answers. Powered by a Retrieval-Augmented Generation (RAG) pipeline.",
+  title: "Recall",
+  description: "Ask questions about your documents and get citation-backed answers.",
 };
 
 export default function RootLayout({
@@ -16,10 +15,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full`}>
-      <body className="min-h-full antialiased">
-        <div className="aurora" />
-        <div className="relative z-10 min-h-screen">{children}</div>
-      </body>
+      <body className="min-h-full antialiased">{children}</body>
     </html>
   );
 }

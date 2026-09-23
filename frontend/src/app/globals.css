@@ -1,21 +1,25 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #07070c;
-  --bg-soft: #0d0d16;
-  --panel: rgba(255, 255, 255, 0.04);
-  --panel-border: rgba(255, 255, 255, 0.08);
-  --text: #ededf2;
-  --muted: #9aa0b4;
-  --accent: #8b5cf6;
+  --sidebar: #f9f9f9;
+  --sidebar-hover: #ececec;
+  --sidebar-active: #e8e8e8;
+  --bg: #ffffff;
+  --surface: #f4f4f4;
+  --border: #e5e5e5;
+  --text: #0d0d0d;
+  --muted: #6b6b6b;
+  --composer: #ffffff;
+  --composer-border: #d9d9d9;
+  --send: #0d0d0d;
+  --danger: #c10007;
 }
 
 @theme inline {
   --color-bg: var(--bg);
-  --color-panel: var(--panel);
   --color-muted: var(--muted);
-  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), monospace;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 html,
@@ -30,97 +34,27 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Ambient gradient glows in the background */
-.aurora {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-.aurora::before,
-.aurora::after {
-  content: "";
-  position: absolute;
-  width: 60vw;
-  height: 60vw;
-  border-radius: 9999px;
-  filter: blur(120px);
-  opacity: 0.28;
-}
-.aurora::before {
-  background: radial-gradient(circle, #7c3aed, transparent 60%);
-  top: -20%;
-  left: -10%;
-  animation: drift 18s ease-in-out infinite alternate;
-}
-.aurora::after {
-  background: radial-gradient(circle, #db2777, transparent 60%);
-  bottom: -25%;
-  right: -10%;
-  animation: drift 22s ease-in-out infinite alternate-reverse;
-}
-@keyframes drift {
-  from {
-    transform: translate(0, 0) scale(1);
-  }
-  to {
-    transform: translate(6%, 8%) scale(1.15);
-  }
-}
-
-/* Glass panel */
-.glass {
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
-  backdrop-filter: blur(14px);
-}
-
-.gradient-text {
-  background: linear-gradient(120deg, #a78bfa, #f0abfc, #818cf8);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.gradient-btn {
-  background: linear-gradient(120deg, #7c3aed, #c026d3);
-  transition: filter 0.2s ease, transform 0.1s ease;
-}
-.gradient-btn:hover {
-  filter: brightness(1.12);
-}
-.gradient-btn:active {
-  transform: translateY(1px);
-}
-.gradient-btn:disabled {
-  opacity: 0.5;
-  filter: grayscale(0.4);
-}
-
-/* Slim scrollbar */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  scrollbar-color: #cfcfcf transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: #cfcfcf;
   border-radius: 999px;
 }
 
-/* Blinking caret for streaming answers */
 .caret::after {
   content: "";
   display: inline-block;
-  width: 7px;
+  width: 2px;
   height: 1.05em;
   margin-left: 2px;
   vertical-align: text-bottom;
-  background: #a78bfa;
+  background: var(--text);
   animation: blink 1s steps(2) infinite;
 }
 @keyframes blink {
@@ -129,7 +63,6 @@ body {
   }
 }
 
-/* Typing dots */
 .dot {
   animation: bounce 1.2s infinite ease-in-out;
 }
@@ -144,35 +77,52 @@ body {
   60%,
   100% {
     transform: translateY(0);
-    opacity: 0.4;
+    opacity: 0.35;
   }
   30% {
-    transform: translateY(-5px);
+    transform: translateY(-4px);
     opacity: 1;
   }
 }
 
-/* Markdown answer styling */
 .prose-answer p {
-  margin: 0.5rem 0;
-  line-height: 1.7;
+  margin: 0.55rem 0;
+  line-height: 1.75;
+}
+.prose-answer p:first-child {
+  margin-top: 0;
+}
+.prose-answer p:last-child {
+  margin-bottom: 0;
 }
 .prose-answer ul,
 .prose-answer ol {
-  margin: 0.5rem 0;
-  padding-left: 1.4rem;
+  margin: 0.55rem 0;
+  padding-left: 1.35rem;
   list-style: revert;
 }
 .prose-answer li {
   margin: 0.25rem 0;
 }
 .prose-answer strong {
-  color: #fff;
+  font-weight: 600;
+  color: var(--text);
 }
 .prose-answer code {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface);
   padding: 0.1rem 0.35rem;
   border-radius: 6px;
   font-family: var(--font-mono);
   font-size: 0.85em;
+}
+.prose-answer pre {
+  background: var(--surface);
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+.prose-answer pre code {
+  background: transparent;
+  padding: 0;
 }

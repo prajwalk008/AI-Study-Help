@@ -84,12 +84,12 @@ export default function UploadZone({
           const f = e.dataTransfer.files?.[0];
           if (f) handleFile(f);
         }}
-        className={`group flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed px-4 py-7 text-center transition ${
+        className={`flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed px-4 py-8 text-center transition ${
           busy ? "cursor-default" : "cursor-pointer"
         } ${
           dragging
-            ? "border-violet-400/70 bg-violet-500/10"
-            : "border-white/15 hover:border-violet-400/50 hover:bg-white/5"
+            ? "border-[var(--text)] bg-[var(--surface)]"
+            : "border-[var(--border)] hover:bg-[var(--surface)]"
         }`}
       >
         <input
@@ -106,27 +106,27 @@ export default function UploadZone({
         />
 
         {status.kind === "done" ? (
-          <CheckCircle2 className="h-6 w-6 text-emerald-400" />
+          <CheckCircle2 className="h-6 w-6 text-[var(--text)]" />
         ) : busy ? (
-          <Loader2 className="h-6 w-6 animate-spin text-violet-300" />
+          <Loader2 className="h-6 w-6 animate-spin text-[var(--muted)]" />
         ) : (
-          <UploadCloud className="h-6 w-6 text-violet-300 transition group-hover:scale-110" />
+          <UploadCloud className="h-6 w-6 text-[var(--muted)]" />
         )}
 
         {status.kind === "busy" ? (
           <UploadStepper ui={status.ui} />
         ) : status.kind === "done" ? (
-          <div className="text-sm font-medium text-emerald-300">Indexed!</div>
+          <div className="text-sm font-medium text-[var(--text)]">Indexed</div>
         ) : (
           <>
-            <div className="text-sm font-medium text-zinc-200">Drop a PDF or click to upload</div>
-            <div className="text-xs text-muted">
+            <div className="text-sm font-medium text-[var(--text)]">Drop a PDF or click to upload</div>
+            <div className="text-xs text-[var(--muted)]">
               Max {MAX_FILE_BYTES / (1024 * 1024)} MB · split into {MAX_PART_BYTES / (1024 * 1024)} MB parts
             </div>
           </>
         )}
       </label>
-      {error && <p className="mt-2 text-xs text-rose-400">{error}</p>}
+      {error && <p className="mt-2 text-xs text-[var(--danger)]">{error}</p>}
     </div>
   );
 }
@@ -134,48 +134,52 @@ export default function UploadZone({
 function UploadStepper({ ui }: { ui: UploadUiState }) {
   return (
     <div className="w-full space-y-2 text-left text-xs">
-      <div className="font-medium text-zinc-200">
+      <div className="font-medium text-[var(--text)]">
         {ui.filename} · {formatMb(ui.fileSize)}
       </div>
 
       <Step done={ui.readDone} label="Read file from disk" active={!ui.readDone} />
-      <Step done={ui.splitDone} label={ui.splitDone ? `Split into ${ui.totalParts} parts` : "Split PDF into parts"} active={ui.readDone && !ui.splitDone} />
+      <Step
+        done={ui.splitDone}
+        label={ui.splitDone ? `Split into ${ui.totalParts} parts` : "Split PDF into parts"}
+        active={ui.readDone && !ui.splitDone}
+      />
 
       {ui.parts.length > 0 && (
-        <div className="mt-2 space-y-1 rounded-lg bg-white/5 p-2">
+        <div className="mt-2 space-y-1 rounded-lg border border-[var(--border)] bg-white p-2">
           {ui.parts.map((p) => (
-            <div key={p.index} className="flex items-start gap-2 text-zinc-300">
+            <div key={p.index} className="flex items-start gap-2 text-[var(--text)]">
               <PartIcon phase={p.phase} />
               <div className="min-w-0 flex-1">
                 <div>Part {p.index + 1}</div>
-                {p.phase === "uploading" && <div className="text-muted">Uploading…</div>}
+                {p.phase === "uploading" && <div className="text-[var(--muted)]">Uploading…</div>}
                 {p.phase === "processing" && (
-                  <div className="flex items-center gap-1 text-muted">
+                  <div className="flex items-center gap-1 text-[var(--muted)]">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     {p.detail || "Processing…"}
                   </div>
                 )}
-                {p.phase === "done" && <div className="text-emerald-400/90">Indexed</div>}
+                {p.phase === "done" && <div className="text-[var(--muted)]">Indexed</div>}
               </div>
             </div>
           ))}
         </div>
       )}
 
-      <div className="text-muted">{ui.stageLabel}</div>
+      <div className="text-[var(--muted)]">{ui.stageLabel}</div>
     </div>
   );
 }
 
 function Step({ done, label, active }: { done: boolean; label: string; active: boolean }) {
   return (
-    <div className="flex items-center gap-2 text-zinc-300">
+    <div className="flex items-center gap-2 text-[var(--text)]">
       {done ? (
-        <CheckCircle className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+        <CheckCircle className="h-3.5 w-3.5 shrink-0 text-[var(--text)]" />
       ) : active ? (
-        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-300" />
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--muted)]" />
       ) : (
-        <Circle className="h-3.5 w-3.5 shrink-0 text-muted" />
+        <Circle className="h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />
       )}
       <span>{label}</span>
     </div>
@@ -183,9 +187,9 @@ function Step({ done, label, active }: { done: boolean; label: string; active: b
 }
 
 function PartIcon({ phase }: { phase: string }) {
-  if (phase === "done") return <CheckCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />;
+  if (phase === "done") return <CheckCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--text)]" />;
   if (phase === "processing" || phase === "uploading") {
-    return <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-violet-300" />;
+    return <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-[var(--muted)]" />;
   }
-  return <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted" />;
+  return <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />;
 }

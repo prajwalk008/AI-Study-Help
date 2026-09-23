@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { BrainCircuit, Loader2, ArrowRight, Mail } from "lucide-react";
+import { Loader2, ArrowRight } from "lucide-react";
 import { requestOtp, verifyOtp, type User } from "@/lib/api";
 
 export default function LoginView({ onSignedIn }: { onSignedIn: (user: User) => void }) {
@@ -40,45 +40,37 @@ export default function LoginView({ onSignedIn }: { onSignedIn: (user: User) => 
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <div className="glass w-full max-w-sm rounded-3xl p-8">
-        <div className="mb-6 flex flex-col items-center text-center">
-          <div className="gradient-btn mb-4 flex h-12 w-12 items-center justify-center rounded-2xl">
-            <BrainCircuit className="h-6 w-6 text-white" />
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Welcome to Re<span className="gradient-text">call</span>
-          </h1>
-          <p className="mt-1 text-sm text-muted">
-            {step === "email" ? "Sign in with your email — no password needed." : `We sent a 6-digit code to ${email}`}
+    <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] px-4">
+      <div className="w-full max-w-[360px]">
+        <div className="mb-8 text-center">
+          <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)]">Recall</h1>
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            {step === "email"
+              ? "Enter your email to continue"
+              : `Enter the code sent to ${email}`}
           </p>
           {step === "code" && (
-            <p className="mt-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-center text-xs font-medium text-amber-200">
-              Don&apos;t see it? Check your spam folder.
-            </p>
+            <p className="mt-3 text-xs text-[var(--muted)]">Don&apos;t see it? Check spam.</p>
           )}
         </div>
 
         {step === "email" ? (
           <div className="flex flex-col gap-3">
-            <div className="glass flex items-center gap-2 rounded-xl px-3">
-              <Mail className="h-4 w-4 text-muted" />
-              <input
-                type="email"
-                autoFocus
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && email.trim() && sendCode()}
-                placeholder="you@example.com"
-                className="flex-1 bg-transparent py-3 text-sm text-zinc-100 placeholder:text-muted focus:outline-none"
-              />
-            </div>
+            <input
+              type="email"
+              autoFocus
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && email.trim() && sendCode()}
+              placeholder="Email address"
+              className="w-full rounded-full border border-[var(--composer-border)] bg-white px-4 py-3 text-sm text-[var(--text)] outline-none placeholder:text-[var(--muted)] focus:border-[var(--text)]"
+            />
             <button
               onClick={sendCode}
               disabled={loading || !email.trim()}
-              className="gradient-btn flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-medium text-white disabled:cursor-not-allowed"
+              className="flex items-center justify-center gap-2 rounded-full bg-[var(--send)] py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Send code <ArrowRight className="h-4 w-4" /></>}
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Continue <ArrowRight className="h-4 w-4" /></>}
             </button>
           </div>
         ) : (
@@ -91,15 +83,15 @@ export default function LoginView({ onSignedIn }: { onSignedIn: (user: User) => 
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
               onKeyDown={(e) => e.key === "Enter" && code.length === 6 && verify()}
-              placeholder="000000"
-              className="glass rounded-xl py-3 text-center text-2xl font-mono tracking-[0.5em] text-zinc-100 placeholder:text-muted focus:outline-none"
+              placeholder="6-digit code"
+              className="w-full rounded-full border border-[var(--composer-border)] bg-white px-4 py-3 text-center text-lg tracking-[0.35em] text-[var(--text)] outline-none placeholder:tracking-normal placeholder:text-[var(--muted)] focus:border-[var(--text)]"
             />
             <button
               onClick={verify}
               disabled={loading || code.length !== 6}
-              className="gradient-btn flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-medium text-white disabled:cursor-not-allowed"
+              className="flex items-center justify-center gap-2 rounded-full bg-[var(--send)] py-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify & sign in"}
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
             </button>
             <button
               onClick={() => {
@@ -107,24 +99,24 @@ export default function LoginView({ onSignedIn }: { onSignedIn: (user: User) => 
                 setCode("");
                 setError(null);
               }}
-              className="text-xs text-muted hover:text-zinc-300"
+              className="text-center text-xs text-[var(--muted)] hover:text-[var(--text)]"
             >
-              ← Use a different email
+              Use a different email
             </button>
             {previewUrl && (
               <a
                 href={previewUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="rounded-xl border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-center text-xs text-violet-200 hover:bg-violet-500/20"
+                className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-center text-xs text-[var(--muted)] hover:text-[var(--text)]"
               >
-                Dev mode: open the test email to read your code →
+                Dev: open test email
               </a>
             )}
           </div>
         )}
 
-        {error && <p className="mt-3 text-center text-xs text-rose-400">{error}</p>}
+        {error && <p className="mt-4 text-center text-xs text-[var(--danger)]">{error}</p>}
       </div>
     </div>
   );
