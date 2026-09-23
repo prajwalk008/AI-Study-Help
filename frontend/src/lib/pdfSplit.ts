@@ -16,7 +16,7 @@ async function buildPartBytes(src: PDFDocument, start: number, end: number): Pro
   return partDoc.save();
 }
 
-/** Greedily pack pages into parts, shrinking ranges until each part is <= 2 MB. */
+/** Greedily pack pages into parts, shrinking ranges until each part is <= MAX_PART_BYTES. */
 export async function splitPdfIntoParts(file: File, onProgress?: (pct: number) => void): Promise<PdfPart[]> {
   const bytes = await file.arrayBuffer();
   onProgress?.(1);
@@ -53,7 +53,7 @@ export async function splitPdfIntoParts(file: File, onProgress?: (pct: number) =
 
     if (partBytes.byteLength > MAX_PART_BYTES) {
       throw new Error(
-        `Page ${start + 1} alone exceeds 2 MB (likely a high-resolution scan). Try compressing the PDF first.`
+        `Page ${start + 1} alone exceeds ${MAX_PART_BYTES / (1024 * 1024)} MB (likely a high-resolution scan). Try compressing the PDF first.`
       );
     }
 
