@@ -32,8 +32,8 @@ UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Render free tier: browser splits before upload; each part must be <= 1 MB.
-MAX_SEGMENT_BYTES = 1 * 1024 * 1024
+# Browser splits before upload; each part must be <= 2 MB.
+MAX_SEGMENT_BYTES = 2 * 1024 * 1024
 
 # Last N words of each page are prepended to the next page (and carried across parts).
 PAGE_TAIL_WORDS = 120
