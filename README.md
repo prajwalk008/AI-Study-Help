@@ -7,7 +7,7 @@ with **citations** pointing to the exact page — so you can trust and verify it
 Built on a **Retrieval-Augmented Generation (RAG)** pipeline with a streaming chat UI, email-OTP
 auth, and a cloud vector database.
 
-**Live:** https://ai-study-help-five.vercel.app *(backend free tier sleeps after 15 min idle — first message may take ~30-60s)*
+**Live:** https://ai-study-help-five.vercel.app 
 
 > Retrieval eval on a labelled test set: **Recall@3 = 1.00**, **MRR = 1.00** (`backend/eval_retrieval.py`).
 
