@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileText, Plus, Loader2 } from "lucide-react";
-import Sidebar, { MobileMenuButton } from "@/components/Sidebar";
+import Sidebar, { SidebarToggle } from "@/components/Sidebar";
 import LoginView from "@/components/LoginView";
 import UploadZone from "@/components/UploadZone";
 import ChatMessage, { type ChatMsg } from "@/components/ChatMessage";
@@ -33,8 +33,32 @@ export default function Home() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [thinking, setThinking] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // ChatGPT-style: sidebar open by default on desktop, closed on mobile.
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("recall.sidebarOpen");
+      if (saved === "0" || saved === "1") {
+        setSidebarOpen(saved === "1");
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
+      setSidebarOpen(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("recall.sidebarOpen", sidebarOpen ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [sidebarOpen]);
 
   useEffect(() => {
     getMe()
@@ -157,8 +181,8 @@ export default function Home() {
         chats={chats}
         activeChatId={activeChatId}
         user={user}
-        open={mobileNavOpen}
-        onClose={() => setMobileNavOpen(false)}
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
         onSelect={selectChat}
         onNew={handleNewChat}
         onDelete={handleDeleteChat}
@@ -167,7 +191,19 @@ export default function Home() {
 
       <main className="relative flex min-w-0 flex-1 flex-col">
         <header className="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 md:px-4">
-          <MobileMenuButton onClick={() => setMobileNavOpen(true)} />
+          {!sidebarOpen && (
+            <>
+              <SidebarToggle onClick={() => setSidebarOpen(true)} label="Open sidebar" />
+              <button
+                onClick={handleNewChat}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text)] hover:bg-[var(--surface)]"
+                aria-label="New chat"
+                title="New chat"
+              >
+                <Plus className="h-5 w-5" />
+              </button>
+            </>
+          )}
           <div className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--text)]">
             {activeChatId
               ? chats.find((c) => c.id === activeChatId)?.title || "Chat"

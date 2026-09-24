@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, MessageSquare, Trash2, LogOut, X, PanelLeft } from "lucide-react";
+import { Plus, MessageSquare, Trash2, LogOut, PanelLeft } from "lucide-react";
 import type { ChatSummary, User } from "@/lib/api";
 
 export default function Sidebar({
@@ -28,27 +28,51 @@ export default function Sidebar({
   const quotaMb = Math.round(user.storageQuotaBytes / (1024 * 1024));
   const pct = Math.min(100, (user.storageUsedBytes / Math.max(user.storageQuotaBytes, 1)) * 100);
 
+  const closeIfMobile = () => {
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
+      onClose();
+    }
+  };
+
   return (
     <>
-      {open && <div onClick={onClose} className="fixed inset-0 z-40 bg-black/30 md:hidden" />}
+      {/* Mobile backdrop */}
+      {open && (
+        <div
+          onClick={onClose}
+          className="fixed inset-0 z-40 bg-black/30 md:hidden"
+          aria-hidden
+        />
+      )}
+
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[260px] shrink-0 flex-col bg-[var(--sidebar)] transition-transform duration-200 md:static md:z-auto md:translate-x-0 ${
-          open ? "translate-x-0" : "-translate-x-full"
-        }`}
+        className={[
+          "z-50 flex w-[260px] shrink-0 flex-col bg-[var(--sidebar)] transition-transform duration-200 ease-out",
+          // Mobile: overlay drawer
+          "fixed inset-y-0 left-0 md:static md:z-auto",
+          open ? "translate-x-0" : "-translate-x-full",
+          // Desktop: collapse by removing from layout when closed
+          open ? "md:flex" : "md:hidden",
+        ].join(" ")}
       >
-        <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-3">
+        <div className="flex items-center gap-1 px-2 pb-2 pt-3">
           <button
             onClick={() => {
               onNew();
-              onClose();
+              closeIfMobile();
             }}
-            className="flex flex-1 items-center gap-2 rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--sidebar-hover)]"
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--sidebar-hover)]"
           >
-            <Plus className="h-4 w-4" />
-            New chat
+            <Plus className="h-4 w-4 shrink-0" />
+            <span className="truncate">New chat</span>
           </button>
-          <button onClick={onClose} className="rounded-lg p-2 text-[var(--muted)] hover:bg-[var(--sidebar-hover)] md:hidden" aria-label="Close menu">
-            <X className="h-5 w-5" />
+          <button
+            onClick={onClose}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)]"
+            aria-label="Close sidebar"
+            title="Close sidebar"
+          >
+            <PanelLeft className="h-5 w-5" />
           </button>
         </div>
 
@@ -69,7 +93,7 @@ export default function Sidebar({
                     <button
                       onClick={() => {
                         onSelect(c.id);
-                        onClose();
+                        closeIfMobile();
                       }}
                       className="flex min-w-0 flex-1 items-center gap-2 text-left"
                     >
@@ -126,12 +150,19 @@ export default function Sidebar({
   );
 }
 
-export function MobileMenuButton({ onClick }: { onClick: () => void }) {
+export function SidebarToggle({
+  onClick,
+  label = "Open sidebar",
+}: {
+  onClick: () => void;
+  label?: string;
+}) {
   return (
     <button
       onClick={onClick}
-      className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text)] hover:bg-[var(--surface)] md:hidden"
-      aria-label="Open menu"
+      className="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text)] hover:bg-[var(--surface)]"
+      aria-label={label}
+      title={label}
     >
       <PanelLeft className="h-5 w-5" />
     </button>
