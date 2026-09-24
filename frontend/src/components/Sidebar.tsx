@@ -2,6 +2,7 @@
 
 import { Plus, MessageSquare, Trash2, LogOut, PanelLeft } from "lucide-react";
 import type { ChatSummary, User } from "@/lib/api";
+import BrandLogo from "@/components/BrandLogo";
 
 export default function Sidebar({
   chats,
@@ -55,7 +56,22 @@ export default function Sidebar({
           open ? "md:flex" : "md:hidden",
         ].join(" ")}
       >
-        <div className="flex items-center gap-1 px-2 pb-2 pt-3">
+        <div className="flex items-center gap-2 px-3 pb-1 pt-3">
+          <BrandLogo className="h-7 w-auto shrink-0" />
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight text-[var(--text)]">
+            Recall
+          </span>
+          <button
+            onClick={onClose}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)]"
+            aria-label="Close sidebar"
+            title="Close sidebar"
+          >
+            <PanelLeft className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1 px-2 pb-2 pt-2">
           <button
             onClick={() => {
               onNew();
@@ -65,14 +81,6 @@ export default function Sidebar({
           >
             <Plus className="h-4 w-4 shrink-0" />
             <span className="truncate">New chat</span>
-          </button>
-          <button
-            onClick={onClose}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--sidebar-hover)] hover:text-[var(--text)]"
-            aria-label="Close sidebar"
-            title="Close sidebar"
-          >
-            <PanelLeft className="h-5 w-5" />
           </button>
         </div>
 

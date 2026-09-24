@@ -4,6 +4,7 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { FileText, ChevronDown } from "lucide-react";
 import type { Source } from "@/lib/api";
+import BrandLogo from "@/components/BrandLogo";
 
 export interface ChatMsg {
   id: string;
@@ -60,8 +61,8 @@ export default function ChatMessage({ msg }: { msg: ChatMsg }) {
 
   return (
     <div className="flex gap-3">
-      <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--border)] bg-white text-[11px] font-semibold text-[var(--text)]">
-        R
+      <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--border)] bg-white p-0.5">
+        <BrandLogo className="h-full w-full" />
       </div>
       <div className="min-w-0 flex-1 pt-0.5 text-[15px] leading-7 text-[var(--text)]">
         {msg.content ? (

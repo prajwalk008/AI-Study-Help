@@ -7,6 +7,7 @@ import LoginView from "@/components/LoginView";
 import UploadZone from "@/components/UploadZone";
 import ChatMessage, { type ChatMsg } from "@/components/ChatMessage";
 import Composer from "@/components/Composer";
+import BrandLogo from "@/components/BrandLogo";
 import {
   getMe,
   listChats,
@@ -221,6 +222,7 @@ export default function Home() {
 
         {!activeChatId ? (
           <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
+            <BrandLogo className="mb-5 h-11 w-auto" />
             <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)]">What can I help with?</h1>
             <p className="mt-2 max-w-sm text-sm text-[var(--muted)]">
               Create a chat, upload a PDF, and ask questions with page citations.
@@ -268,6 +270,7 @@ export default function Home() {
               <div className="mx-auto max-w-3xl px-4 py-6">
                 {messages.length === 0 ? (
                   <div className="flex flex-col items-center pt-16 text-center">
+                    <BrandLogo className="mb-4 h-10 w-auto" />
                     <h2 className="text-xl font-semibold tracking-tight text-[var(--text)]">
                       {hasDocs ? "Ask anything about your documents" : "Upload a PDF to begin"}
                     </h2>

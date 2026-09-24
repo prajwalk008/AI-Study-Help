@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Loader2, ArrowRight } from "lucide-react";
 import { requestOtp, verifyOtp, type User } from "@/lib/api";
+import BrandLogo from "@/components/BrandLogo";
 
 export default function LoginView({ onSignedIn }: { onSignedIn: (user: User) => void }) {
   const [step, setStep] = useState<"email" | "code">("email");
@@ -42,7 +43,8 @@ export default function LoginView({ onSignedIn }: { onSignedIn: (user: User) => 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--bg)] px-4">
       <div className="w-full max-w-[360px]">
-        <div className="mb-8 text-center">
+        <div className="mb-8 flex flex-col items-center text-center">
+          <BrandLogo className="mb-4 h-10 w-auto" />
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)]">Recall</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
             {step === "email"
