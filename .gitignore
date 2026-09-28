@@ -25,3 +25,5 @@ backend/atlas-credentials.env
 
 # Personal design notes, not for the public repo
 DESIGN_NOTES.md
+.mailmap
+PROJECT_SUMMARY.md
