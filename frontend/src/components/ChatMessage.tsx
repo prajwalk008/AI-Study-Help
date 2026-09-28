@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
 import { FileText, ChevronDown } from "lucide-react";
 import type { Source } from "@/lib/api";
 import BrandLogo from "@/components/BrandLogo";
@@ -67,7 +69,9 @@ export default function ChatMessage({ msg }: { msg: ChatMsg }) {
       <div className="min-w-0 flex-1 pt-0.5 text-[15px] leading-7 text-[var(--text)]">
         {msg.content ? (
           <div className={`prose-answer ${msg.streaming ? "caret" : ""}`}>
-            <ReactMarkdown>{msg.content}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+              {msg.content}
+            </ReactMarkdown>
           </div>
         ) : (
           <span className="flex items-center gap-1.5 py-2">
