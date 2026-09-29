@@ -18,10 +18,15 @@ auth, and a cloud vector database.
 - 📄 **Multi-PDF knowledge base** — ask questions across everything you've uploaded, per chat
 - 🖼️ **Works on scanned PDFs & book photos** — automatic OCR fallback for image-only pages
 - 🎯 **Citation-backed answers** — each answer cites the source doc + page, with relevance scores
+- 🌐 **Web-search fallback** — if the answer isn't in your documents, the assistant says so and falls back to a web search instead of guessing
+- ✍️ **Rich markdown answers** — tables, code blocks, and lists render properly (`react-markdown` + GFM), not raw text
 - ⚡ **Token-by-token streaming** — answers type out live
 - 🔍 **Semantic search** — finds meaning, not just keyword matches, via a cloud vector database
-- 📱 **Responsive** — collapsible sidebar on mobile
-- 🎨 **Modern UI** — dark, glassmorphic, animated (Next.js + Tailwind)
+- 📦 **Large PDF uploads from the browser** — big files are split into sub-4MB parts client-side (`pdf-lib`) and streamed up in segments, working around host/CDN body-size limits
+- 📊 **Per-user storage quota** — uploads are metered (100MB/user by default) and atomically reserved/released in Mongo so concurrent uploads can't overrun it
+- 📱 **Responsive** — sidebar collapses on mobile *and* can be toggled closed on desktop
+- 🎨 **Modern UI** — dark, glassmorphic, animated (Next.js + Tailwind), with custom branding/logo
+- 🐳 **Dockerized** — `docker-compose up` runs the full stack (frontend + backend) locally with one command
 
 ---
 
@@ -103,6 +108,13 @@ cd backend
 .\start.ps1
 ```
 
+### Or run it all with Docker
+```powershell
+docker-compose up --build
+```
+Builds and runs both services (`backend/Dockerfile`, `frontend/Dockerfile`) using `backend/.env` and
+`frontend/.env.local` — frontend on `:3000`, backend on `:8000`, with a named volume for uploaded PDFs.
+
 ---
 
 ## ☁️ Deployment
@@ -110,6 +122,7 @@ cd backend
 - **Backend:** Render (root directory `backend`, free tier — sleeps after 15 min idle)
 - **Auth/chat data:** MongoDB Atlas (free tier)
 - **Vectors:** Qdrant Cloud (free tier)
+- **Or self-host either service** from its Dockerfile — see `docker-compose.yml`
 
 See `CLAUDE.md` for the full environment variable reference for each service.
 
@@ -117,34 +130,41 @@ See `CLAUDE.md` for the full environment variable reference for each service.
 
 ## 🧪 Tech Stack
 **Backend:** Python, FastAPI, fastembed (ONNX), Qdrant, Groq LLM, PyMuPDF, RapidOCR (ONNX)
-**Frontend:** Next.js 16, React 19, TypeScript, Tailwind CSS v4, MongoDB driver, Nodemailer, lucide-react
+**Frontend:** Next.js 16, React 19, TypeScript, Tailwind CSS v4, MongoDB driver, Nodemailer, lucide-react, react-markdown, pdf-lib
 
 ## 📂 Structure
 ```
 AI-Study-Help/
+├── docker-compose.yml     # runs backend + frontend together
 ├── backend/
+│   ├── Dockerfile
 │   ├── app/
 │   │   ├── config.py         # tunable RAG knobs + env vars
-│   │   ├── ingest.py         # PDF extraction + chunking (+ OCR fallback)
+│   │   ├── ingest.py         # PDF extraction + chunking (+ OCR fallback, page-tail carry-over)
+│   │   ├── jobs.py           # background job tracking for async/segmented uploads
 │   │   ├── ocr.py            # RapidOCR fallback for scanned/image-only pages
 │   │   ├── embeddings.py     # fastembed wrapper (normalized vectors)
 │   │   ├── vectorstore.py    # Qdrant collection + per-chat payload filtering
 │   │   ├── store_manager.py  # per-chat locks + VectorStore access
 │   │   ├── llm.py            # Groq streaming wrapper
-│   │   ├── rag.py            # the RAG engine (retrieve + prompt + generate)
-│   │   └── main.py           # FastAPI endpoints
+│   │   ├── rag.py            # the RAG engine (retrieve + prompt + generate, web-search fallback)
+│   │   └── main.py           # FastAPI endpoints (incl. segmented PDF upload)
 │   ├── smoke_test.py         # embed -> Qdrant -> retrieve sanity check
 │   ├── eval_retrieval.py     # Recall@k / MRR harness
 │   ├── test_ocr.py           # OCR fallback test
+│   ├── test_page_tail.py     # page-tail chunk carry-over test
 │   └── requirements.txt
 └── frontend/
+    ├── Dockerfile
     └── src/
         ├── app/
         │   ├── page.tsx          # owns all app state
         │   └── api/              # Next.js routes = the real backend (BFF)
         │       ├── auth/         # request-otp, verify-otp, me, logout
-        │       └── chats/[id]/   # chat, upload, messages, delete
-        ├── components/           # Sidebar, LoginView, UploadZone, ChatMessage, Composer
+        │       ├── quota/        # reserve/release storage quota
+        │       └── chats/[id]/   # chat, messages, delete, upload/segment, upload/status
+        ├── components/           # Sidebar (collapsible), LoginView, UploadZone, ChatMessage
+        │                         # (markdown rendering), Composer, BrandLogo
         └── lib/
             ├── api.ts            # typed API client + NDJSON stream parser
             ├── mongo.ts          # cached Mongo client + index setup
@@ -152,7 +172,10 @@ AI-Study-Help/
             ├── session.ts        # session token issuing/verification
             ├── mailer.ts         # Ethereal (dev) / SMTP (prod) email sending
             ├── chatauth.ts       # per-chat ownership authorization
-            └── fastapi.ts        # server-side fetch to the FastAPI service
+            ├── fastapi.ts        # server-side fetch to the FastAPI service
+            ├── pdfSplit.ts       # client-side PDF splitting into upload-sized parts
+            ├── quota.ts          # atomic per-user storage reserve/release (Mongo)
+            └── uploadLimits.ts   # shared size/quota constants
 ```
 
 ## 🔒 Notes
@@ -163,3 +186,8 @@ AI-Study-Help/
   which chat IDs exist.
 - Qdrant `IndexFlatIP`-equivalent exact search is used via a single shared collection filtered
   by `chat_id`; at a much larger scale you'd move to an approximate index (HNSW) for speed.
+- Storage quota is enforced with an atomic Mongo `findOneAndUpdate` (`frontend/src/lib/quota.ts`)
+  so concurrent uploads can't race past the per-user limit; stale `processing` docs are swept and
+  their reserved space released.
+- Large PDFs are split into ≤4MB parts in the browser (`pdfSplit.ts`) and uploaded as segments,
+  since Vercel/most hosts cap request bodies well below typical PDF sizes.
