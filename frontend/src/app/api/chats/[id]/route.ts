@@ -4,6 +4,7 @@ import { getDb } from "@/lib/mongo";
 import { requireOwnedChat } from "@/lib/chatauth";
 import { fastapiFetch } from "@/lib/fastapi";
 import { releaseStorage } from "@/lib/quota";
+import { decryptField } from "@/lib/fieldcipher";
 
 export const runtime = "nodejs";
 
@@ -23,7 +24,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     chat: { id, title: gate.chat.title, updatedAt: gate.chat.updatedAt },
     documents: documents.map((d) => ({
       id: String(d._id),
-      docName: d.docName,
+      docName: decryptField(String(d.docName ?? ""), `documents|docName|${d._id}`),
       chunks: d.chunks,
       pages: d.pages,
       status: d.status,

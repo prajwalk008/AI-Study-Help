@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongo";
 import { normalizeEmail, generateOtp, hashOtp } from "@/lib/otp";
 import { sendOtpEmail } from "@/lib/mailer";
+import { emailFingerprint, encryptField } from "@/lib/fieldcipher";
 
 export const runtime = "nodejs";
 
@@ -25,27 +26,27 @@ export async function POST(req: Request) {
   const otps = db.collection("otps");
 
   // Resend cooldown: don't let someone spam emails / regenerate codes rapidly.
-  const existing = await otps.findOne({ email });
+  const lookup = emailFingerprint(email);
+  const existing =
+    (await otps.findOne({ emailLookup: lookup })) ?? (await otps.findOne({ email }));
   if (existing?.lastSentAt && Date.now() - new Date(existing.lastSentAt).getTime() < RESEND_COOLDOWN_MS) {
     return NextResponse.json({ error: "Please wait a moment before requesting another code." }, { status: 429 });
   }
-
   const code = generateOtp();
   const now = new Date();
-  // One active OTP per email (unique index) — overwrite any previous code.
-  await otps.updateOne(
-    { email },
-    {
-      $set: {
-        email,
-        codeHash: hashOtp(email, code),
-        expiresAt: new Date(now.getTime() + OTP_TTL_MS),
-        attempts: 0,
-        lastSentAt: now,
-      },
-    },
-    { upsert: true }
-  );
+  const fields = {
+    emailLookup: lookup,
+    email: encryptField(email, `otps|email|${lookup}`),
+    codeHash: hashOtp(email, code),
+    expiresAt: new Date(now.getTime() + OTP_TTL_MS),
+    attempts: 0,
+    lastSentAt: now,
+  };
+  if (existing) {
+    await otps.updateOne({ _id: existing._id }, { $set: fields });
+  } else {
+    await otps.insertOne(fields);
+  }
 
   let previewUrl: string | null = null;
   try {

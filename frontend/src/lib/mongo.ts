@@ -40,6 +40,8 @@ function ensureIndexes(db: Db): Promise<void> {
       await db.collection("messages").createIndex({ chatId: 1, createdAt: 1 });
       await db.collection("documents").createIndex({ chatId: 1, createdAt: 1 });
       await db.collection("documents").createIndex({ userId: 1 });
+      await db.collection("users").createIndex({ emailLookup: 1 }, { unique: true, sparse: true });
+      await db.collection("otps").createIndex({ emailLookup: 1 }, { unique: true, sparse: true });
     })().catch((e) => {
       globalForMongo._mongoIndexesReady = undefined; // allow retry on next call
       throw e;

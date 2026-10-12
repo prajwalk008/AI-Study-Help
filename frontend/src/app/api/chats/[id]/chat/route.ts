@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import { getDb } from "@/lib/mongo";
 import { requireOwnedChat } from "@/lib/chatauth";
 import { fastapiFetch } from "@/lib/fastapi";
+import { encryptField, encryptJson } from "@/lib/fieldcipher";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,16 +24,21 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   const db = await getDb();
   const now = new Date();
+
+  const userMessageId = new ObjectId();
   await db.collection("messages").insertOne({
+    _id: userMessageId,
     chatId: id,
     userId: gate.userId,
     role: "user",
-    content: question,
+    content: encryptField(question, `messages|content|${userMessageId}`),
     createdAt: now,
   });
   // Auto-title a fresh chat from its first question.
   const update: Record<string, unknown> = { updatedAt: now };
-  if (gate.chat.title === "New chat") update.title = question.slice(0, 48);
+  if (gate.chat.title === "New chat") {
+    update.title = encryptField(question.slice(0, 48), `chats|title|${id}`);
+  }
   await db.collection("chats").updateOne({ _id: new ObjectId(id) }, { $set: update });
 
   const upstream = await fastapiFetch(`/api/chat?chat_id=${encodeURIComponent(id)}`, {
@@ -73,12 +79,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     }
     const db2 = await getDb();
     // Never store a partial stream as if it were a complete answer.
+    const assistantMessageId = new ObjectId();
     await db2.collection("messages").insertOne({
+      _id: assistantMessageId,
       chatId: id,
       userId: gate.userId,
       role: "assistant",
-      content,
-      sources,
+      content: encryptField(content, `messages|content|${assistantMessageId}`),
+      sources:
+        sources == null
+          ? null
+          : encryptJson(sources, `messages|sources|${assistantMessageId}`),
       status: done ? "complete" : "failed",
       createdAt: new Date(),
     });

@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 import { getDb } from "./mongo";
 import { getSession } from "./session";
+import { decryptField } from "./fieldcipher";
 
 export function toObjectId(id: string): ObjectId | null {
   return ObjectId.isValid(id) ? new ObjectId(id) : null;
@@ -24,5 +25,6 @@ export async function requireOwnedChat(
   const chat = await db.collection("chats").findOne({ _id: oid, userId });
   if (!chat) return { ok: false, status: 404, error: "Chat not found." };
 
-  return { ok: true, userId, chat };
+  const plainTitle = decryptField(String(chat.title ?? ""), `chats|title|${chatId}`);
+  return { ok: true, userId, chat: { ...chat, title: plainTitle } };
 }

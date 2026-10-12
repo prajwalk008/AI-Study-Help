@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { cookies } from "next/headers";
 import { ObjectId } from "mongodb";
 import { getDb } from "./mongo";
+import { openEmail } from "./fieldcipher";
 
 const COOKIE = "recall_session";
 const TTL_DAYS = parseInt(process.env.SESSION_TTL_DAYS || "30", 10);
@@ -62,7 +63,7 @@ export async function getSession(): Promise<SessionUser | null> {
 
   return {
     id: String(user._id),
-    email: user.email,
+    email: openEmail(user.email, user.emailLookup),
     storageQuotaBytes: user.storageQuotaBytes ?? STORAGE_QUOTA_BYTES,
     storageUsedBytes: user.storageUsedBytes ?? 0,
   };

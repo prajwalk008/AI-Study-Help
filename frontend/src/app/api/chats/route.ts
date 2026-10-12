@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import { getDb } from "@/lib/mongo";
 import { getSession } from "@/lib/session";
+import { decryptField, encryptField } from "@/lib/fieldcipher";
 
 export const runtime = "nodejs";
 
@@ -19,7 +20,7 @@ export async function GET() {
   return NextResponse.json({
     chats: chats.map((c) => ({
       id: String(c._id),
-      title: c.title,
+      title: decryptField(String(c.title ?? ""), `chats|title|${c._id}`),
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
     })),
@@ -40,9 +41,11 @@ export async function POST(req: Request) {
 
   const db = await getDb();
   const now = new Date();
+  const chatId = new ObjectId();
   const res = await db.collection("chats").insertOne({
+    _id: chatId,
     userId: new ObjectId(user.id),
-    title,
+    title: encryptField(title, `chats|title|${chatId}`),
     createdAt: now,
     updatedAt: now,
   });

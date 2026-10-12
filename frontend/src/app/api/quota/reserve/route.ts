@@ -5,6 +5,7 @@ import { reserveStorage } from "@/lib/quota";
 import { MAX_FILE_BYTES } from "@/lib/uploadLimits";
 import { requireOwnedChat } from "@/lib/chatauth";
 import { getDb } from "@/lib/mongo";
+import { encryptField } from "@/lib/fieldcipher";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,11 +52,13 @@ export async function POST(req: Request) {
   }
 
   const db = await getDb();
+ const docOid = new ObjectId();
   await db.collection("documents").insertOne({
+    _id: docOid,
     chatId,
     userId,
     uploadId,
-    docName: filename,
+    docName: encryptField(filename, `documents|docName|${docOid}`),
     sizeBytes: fileSize,
     chunks: 0,
     pages: 0,

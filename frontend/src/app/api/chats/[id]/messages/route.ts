@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongo";
 import { requireOwnedChat } from "@/lib/chatauth";
+import { decryptField, decryptJson } from "@/lib/fieldcipher";
 
 export const runtime = "nodejs";
 
@@ -18,10 +19,10 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
 
   return NextResponse.json({
     messages: messages.map((m) => ({
-      id: String(m._id),
+      id: String(m._id),  
       role: m.role,
-      content: m.content,
-      sources: m.sources ?? null,
+      content: decryptField(String(m.content ?? ""), `messages|content|${m._id}`),
+      sources: decryptJson(m.sources, `messages|sources|${m._id}`),
       status: m.status ?? "complete",
     })),
   });
