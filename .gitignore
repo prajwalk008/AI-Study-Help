@@ -27,3 +27,5 @@ backend/atlas-credentials.env
 DESIGN_NOTES.md
 .mailmap
 PROJECT_SUMMARY.md
+
+.cursor
