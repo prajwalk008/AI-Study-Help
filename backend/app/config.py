@@ -15,6 +15,8 @@ INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
 QDRANT_URL = os.getenv("QDRANT_URL", "")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "chunks")
+# Base64 of 32 random bytes. Locks passage text stored in Qdrant.
+QDRANT_PAYLOAD_KEY = os.getenv("QDRANT_PAYLOAD_KEY", "")
 
 # RAG tuning knobs
 CHUNK_SIZE_WORDS = 380

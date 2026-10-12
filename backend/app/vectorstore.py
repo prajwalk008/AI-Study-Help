@@ -18,6 +18,8 @@ from qdrant_client.http.models import (
 from . import config
 from .ingest import Chunk
 
+from .fieldcipher import decrypt_field, encrypt_field
+
 _ID_NAMESPACE = uuid.UUID("12345678-1234-5678-1234-567812345678")
 _UPSERT_BATCH_SIZE = 20  # this cluster writes ~0.2s/point, keep batches well under the client timeout
 
@@ -56,6 +58,16 @@ def _point_id(chunk_id: str) -> str:
 def _chat_filter(chat_id: str) -> Filter:
     return Filter(must=[FieldCondition(key="chat_id", match=MatchValue(value=chat_id))])
 
+def _readable_payload(payload: dict) -> dict:
+    """Copy a Qdrant record and unlock the text fields. Search numbers are not touched."""
+    opened = dict(payload)
+    chat_id = str(opened.get("chat_id", ""))
+    record_id = str(opened.get("id", ""))
+    for field in ("text", "doc_name"):
+        value = opened.get(field)
+        if isinstance(value, str):
+            opened[field] = decrypt_field(value, field=field, record_id=record_id, chat_id=chat_id)
+    return opened
 
 class VectorStore:
     def __init__(self, chat_id: str):
@@ -63,14 +75,18 @@ class VectorStore:
         self.client = _get_client()
 
     def add(self, chunks: List[Chunk], embeddings: np.ndarray):
-        points = [
-            PointStruct(
-                id=_point_id(c.id),
-                vector=embeddings[i].tolist(),
-                payload={"chat_id": self.chat_id, **c.to_dict()},
+        points = []
+        for i, c in enumerate(chunks):
+            raw = c.to_dict()
+            raw["text"] = encrypt_field(raw["text"], field="text", record_id=c.id, chat_id=self.chat_id)
+            raw["doc_name"] = encrypt_field(raw["doc_name"], field="doc_name", record_id=c.id, chat_id=self.chat_id)
+            points.append(
+                PointStruct(
+                    id=_point_id(c.id),
+                    vector=embeddings[i].tolist(),
+                    payload={"chat_id": self.chat_id, **raw},
+                )
             )
-            for i, c in enumerate(chunks)
-        ]
         # one big upsert can time out for large documents, so send it in batches
         for i in range(0, len(points), _UPSERT_BATCH_SIZE):
             batch = points[i:i + _UPSERT_BATCH_SIZE]
@@ -95,7 +111,7 @@ class VectorStore:
             limit=k,
             with_payload=True,
         ).points
-        return [(h.payload, float(h.score)) for h in hits]
+        return [(_readable_payload(h.payload), float(h.score)) for h in hits]
 
     def documents(self) -> List[dict]:
         docs = {}
@@ -110,7 +126,7 @@ class VectorStore:
                 with_vectors=False,
             )
             for point in points:
-                meta = point.payload
+                meta = _readable_payload(point.payload)
                 entry = docs.setdefault(meta["doc_id"], {"doc_id": meta["doc_id"], "doc_name": meta["doc_name"], "chunks": 0})
                 entry["chunks"] += 1
             if offset is None:

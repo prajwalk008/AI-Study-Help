@@ -8,3 +8,4 @@ fastembed
 qdrant-client
 groq
 python-dotenv
+cryptography
