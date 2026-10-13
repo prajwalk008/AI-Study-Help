@@ -15,6 +15,7 @@ auth, and a cloud vector database.
 
 ## ✨ Features
 - 🔑 **Passwordless email-OTP login** — no passwords to manage
+- 🔒 **Encryption at rest** — passage text and file names in Qdrant, and questions, answers, titles, file names, and emails in Mongo, are stored as AES-256-GCM ciphertext
 - 📄 **Multi-PDF knowledge base** — ask questions across everything you've uploaded, per chat
 - 🖼️ **Works on scanned PDFs & book photos** — automatic OCR fallback for image-only pages
 - 🎯 **Citation-backed answers** — each answer cites the source doc + page, with relevance scores
@@ -67,6 +68,52 @@ chat — this also means chunks survive backend restarts/redeploys on hosts with
 
 ---
 
+## 🔒 Encryption at rest
+
+A stolen Mongo dump or a leaked Qdrant API key should not reveal notes, questions, answers, or file names. MongoDB Atlas and Qdrant Cloud already encrypt disks and the network connection. This project adds a second lock inside the saved fields themselves.
+
+The app still sees readable text while it handles a request. FastAPI has to read the PDF, build the search numbers, and send the question plus the matching passages to Groq. When the request finishes, only the locked copy remains in the databases. The browser still shows a normal answer. Traffic between the browser, Vercel, FastAPI, Groq, Mongo, and Qdrant is protected by HTTPS when those addresses start with `https://`.
+
+Two keys, one per service. Next.js is the only process that talks to Mongo, so it alone holds `MONGO_FIELD_KEY`. FastAPI is the only process that talks to Qdrant, so it alone holds `QDRANT_PAYLOAD_KEY`. Each key is 32 random bytes, base64, in that service's environment. It is never written into the Docker image or into git. Losing a key makes the values it locked unreadable.
+
+| Store | Locked | Left readable, and why |
+|-------|--------|------------------------|
+| Qdrant payload | passage `text`, `doc_name` | the 384 search numbers (cosine search needs the real floats); `chat_id` (per-chat filter); `doc_id` and `page` (ids, not the writing) |
+| `messages` | `content` (question and answer), `sources` (citation list, including the short quote) | `role`, `status`, `chatId`, `userId`, `createdAt` |
+| `chats` | `title` | `userId`, `createdAt`, `updatedAt` |
+| `documents` | `docName` | `status`, `sizeBytes`, `chunks`, `pages`, and the ids used to find the row |
+| `users` | `email` | `emailLookup` (HMAC fingerprint used to find the account), quota numbers, `verified`, `createdAt` |
+| `otps` | `email` | `codeHash` (the 6-digit code is never stored), `attempts`, `expiresAt` |
+| `sessions` | — | `tokenHash` is already a SHA-256 fingerprint of the cookie, not the cookie itself |
+
+The cipher is AES-256-GCM. Every value gets a fresh 12-byte random starter and a 16-byte tag, stored as one string:
+
+```text
+v1.<starter>.<ciphertext>.<tag>
+```
+
+A stamp is bound to each value (collection, field, and record id, and the chat id for Qdrant). A ciphertext copied onto another chat or user fails to open. Values with no `v1.` prefix are older plain text and are returned as-is, so rows saved before this change still load.
+
+Email cannot be found if it is locked with a random starter, so login stores `emailLookup = HMAC-SHA256(MONGO_FIELD_KEY, normalized email)` and searches on that. The address itself is the locked `email` field. The first successful login of an old account rewrites that row into the locked form.
+
+| Step | Where |
+|------|--------|
+| Lock and unlock Qdrant text | `backend/app/fieldcipher.py`, called from `backend/app/vectorstore.py` on save and after search |
+| Lock and unlock Mongo fields | `frontend/src/lib/fieldcipher.ts`, called from the chat, message, document, and auth routes |
+| Unlock a chat title for the "New chat" check | `frontend/src/lib/chatauth.ts` (the database copy stays locked) |
+| Unlock the signed-in user's email | `frontend/src/lib/session.ts` |
+
+Generate the two keys separately. Use the same `QDRANT_PAYLOAD_KEY` everywhere that backend runs, and the same `MONGO_FIELD_KEY` everywhere the website runs (local `.env.local` and Vercel).
+
+```powershell
+python -c "import os,base64; print(base64.b64encode(os.urandom(32)).decode())"
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+Put the first value in `backend/.env` as `QDRANT_PAYLOAD_KEY`, and the second in `frontend/.env.local` as `MONGO_FIELD_KEY`.
+
+---
+
 ## 🚀 Getting Started
 
 ### Prerequisites
@@ -82,7 +129,7 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-copy .env.example .env      # then fill in GROQ_API_KEY, INTERNAL_API_SECRET, QDRANT_URL, QDRANT_API_KEY
+copy .env.example .env      # then fill in GROQ_API_KEY, INTERNAL_API_SECRET, QDRANT_URL, QDRANT_API_KEY, QDRANT_PAYLOAD_KEY
 python -m uvicorn app.main:app --port 8000
 ```
 
@@ -91,6 +138,7 @@ python -m uvicorn app.main:app --port 8000
 cd frontend
 npm install
 # create frontend/.env.local — see CLAUDE.md for the full variable list
+# include MONGO_FIELD_KEY (base64 of 32 random bytes) or chat saves and login will fail
 npm run dev
 ```
 Open **http://localhost:3000**, sign in with your email, upload a PDF, and start asking questions.
@@ -129,7 +177,7 @@ See `CLAUDE.md` for the full environment variable reference for each service.
 ---
 
 ## 🧪 Tech Stack
-**Backend:** Python, FastAPI, fastembed (ONNX), Qdrant, Groq LLM, PyMuPDF, RapidOCR (ONNX)
+**Backend:** Python, FastAPI, fastembed (ONNX), Qdrant, Groq LLM, PyMuPDF, RapidOCR (ONNX), cryptography (AES-256-GCM)
 **Frontend:** Next.js 16, React 19, TypeScript, Tailwind CSS v4, MongoDB driver, Nodemailer, lucide-react, react-markdown, pdf-lib
 
 ## 📂 Structure
@@ -144,6 +192,7 @@ AI-Study-Help/
 │   │   ├── jobs.py           # background job tracking for async/segmented uploads
 │   │   ├── ocr.py            # RapidOCR fallback for scanned/image-only pages
 │   │   ├── embeddings.py     # fastembed wrapper (normalized vectors)
+│   │   ├── fieldcipher.py    # AES-256-GCM for Qdrant passage text and file names
 │   │   ├── vectorstore.py    # Qdrant collection + per-chat payload filtering
 │   │   ├── store_manager.py  # per-chat locks + VectorStore access
 │   │   ├── llm.py            # Groq streaming wrapper
@@ -173,13 +222,14 @@ AI-Study-Help/
             ├── mailer.ts         # Ethereal (dev) / SMTP (prod) email sending
             ├── chatauth.ts       # per-chat ownership authorization
             ├── fastapi.ts        # server-side fetch to the FastAPI service
+            ├── fieldcipher.ts     # AES-256-GCM for Mongo fields + email fingerprint
             ├── pdfSplit.ts       # client-side PDF splitting into upload-sized parts
             ├── quota.ts          # atomic per-user storage reserve/release (Mongo)
             └── uploadLimits.ts   # shared size/quota constants
 ```
 
 ## 🔒 Notes
-- `.env` / `.env.local` are git-ignored — never commit them.
+- `.env` / `.env.local` are git-ignored — never commit them. That includes `QDRANT_PAYLOAD_KEY` and `MONGO_FIELD_KEY`. A lost key cannot be recovered from the database.
 - FastAPI has no user-level auth of its own — every request requires a shared secret header,
   and real authorization (session, chat ownership) happens entirely in the Next.js layer.
 - Chats return **404, not 403** when you don't own them, so responses can't be used to guess
