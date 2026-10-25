@@ -1,15 +1,17 @@
 # 🧠 Recall — AI Study Assistant (RAG)
 
-Sign in with just your email, upload your notes/textbooks/papers into per-topic chats, and ask
-questions in natural language. Every answer is **generated only from your documents** and comes
-with **citations** pointing to the exact page — so you can trust and verify it.
+Sign in with an email verification code, upload PDFs into chats, and ask questions in natural
+language. Recall retrieves passages from the PDFs and asks the model to answer from them. It shows
+the retrieved document names, page labels, scores, and previews so you can check the answer against
+the source. The model's claims and inline citations are not independently verified.
 
 Built on a **Retrieval-Augmented Generation (RAG)** pipeline with a streaming chat UI, email-OTP
-auth, and a cloud vector database.
+auth, and Qdrant vector search.
 
-**Live:** https://ai-study-help-five.vercel.app 
+**Demo URL:** https://ai-study-help-five.vercel.app
 
-> Retrieval eval on a labelled test set: **Recall@3 = 1.00**, **MRR = 1.00** (`backend/eval_retrieval.py`).
+`backend/eval_retrieval.py` computes Recall@3 and MRR on six hand-written passage/question pairs
+using local embeddings. It does not evaluate PDF extraction, Qdrant search, or generated answers.
 
 ---
 
@@ -17,17 +19,17 @@ auth, and a cloud vector database.
 - 🔑 **Passwordless email-OTP login** — no passwords to manage
 - 🔒 **Encryption at rest** — passage text and file names in Qdrant, and questions, answers, titles, file names, and emails in Mongo, are stored as AES-256-GCM ciphertext
 - 📄 **Multi-PDF knowledge base** — ask questions across everything you've uploaded, per chat
-- 🖼️ **Works on scanned PDFs & book photos** — automatic OCR fallback for image-only pages
-- 🎯 **Citation-backed answers** — each answer cites the source doc + page, with relevance scores
-- 🌐 **Web-search fallback** — if the answer isn't in your documents, the assistant says so and falls back to a web search instead of guessing
+- 🖼️ **Scanned PDF support** — OCR is attempted when a PDF page has fewer than 20 extracted text characters; standalone image uploads are not supported
+- 🎯 **Source context** — retrieved passages are shown with document names, page labels, relevance scores, and previews; the prompt requests inline citations, but the app does not validate them
+- 📝 **Grounding prompt** — asks the model to use retrieved passages; there is currently no implemented web-search fallback or guarantee against unsupported answers
 - ✍️ **Rich markdown answers** — tables, code blocks, and lists render properly (`react-markdown` + GFM), not raw text
 - ⚡ **Token-by-token streaming** — answers type out live
 - 🔍 **Semantic search** — finds meaning, not just keyword matches, via a cloud vector database
-- 📦 **Large PDF uploads from the browser** — big files are split into sub-4MB parts client-side (`pdf-lib`) and streamed up in segments, working around host/CDN body-size limits
-- 📊 **Per-user storage quota** — uploads are metered (100MB/user by default) and atomically reserved/released in Mongo so concurrent uploads can't overrun it
+- 📦 **PDF uploads from the browser** — files up to 50 MiB are split by page into parts of at most 4 MiB (`pdf-lib`) and uploaded sequentially; a single page over 4 MiB must be compressed first
+- 📊 **Per-user storage quota** — 100 MiB per user by default; Mongo atomically reserves space for uploads, and cleanup releases it on failure or deletion
 - 📱 **Responsive** — sidebar collapses on mobile *and* can be toggled closed on desktop
-- 🎨 **Modern UI** — dark, glassmorphic, animated (Next.js + Tailwind), with custom branding/logo
-- 🐳 **Dockerized** — `docker-compose up` runs the full stack (frontend + backend) locally with one command
+- 🎨 **Responsive light UI** — Next.js + Tailwind, with custom branding and animated loading states
+- 🐳 **Dockerized** — `docker-compose up --build` starts both services after their environment files are configured
 
 ---
 
@@ -42,37 +44,43 @@ auth, and a cloud vector database.
 └──────────┬─────────────────┘                              └─────────────┬────────────┘
            │                                                              │
            ▼                                                              │
-   MongoDB Atlas                                    PDF ──▶ 1) Extract text (PyMuPDF, per page)
+   MongoDB                                          PDF ──▶ 1) Extract text (PyMuPDF, per page)
    users / sessions / otps                                     └─ OCR fallback (RapidOCR)
    chats / messages / documents                              2) Chunk (~380 words, 60 overlap)
                                                                3) Embed (fastembed / bge-small, ONNX)
-                                                               4) Index (Qdrant Cloud, cosine) ◀──┐
+                                                               4) Index (Qdrant, cosine) ◀────────┐
                                                   Question ──▶ 5) Retrieve top-k chunks           │
-                                                               6) Generate grounded answer         │
-                                                                  + citations (Groq LLM) ──────────┘
+                                                               6) Ask Groq to answer from context │
+                                                                  and cite passages ───────────────┘
 ```
 
 Each chat's chunks live in **one shared Qdrant collection**, isolated via a `chat_id` payload
-filter (Qdrant's own recommended pattern for many small tenants) rather than one collection per
-chat — this also means chunks survive backend restarts/redeploys on hosts with ephemeral disk.
+filter rather than one collection per chat. Qdrant persists the chunks across backend restarts and
+redeploys even when the backend has ephemeral disk. The Next.js layer checks chat ownership before
+calling the internal FastAPI service.
 
 ### The RAG pipeline (stage by stage)
 | Stage | File | What it does | Key choice |
 |-------|------|--------------|------------|
-| Ingest | `app/ingest.py` | PDF → text, per page (+ OCR fallback) | keep page numbers → enables citations; OCR only when text layer is empty |
-| Chunk | `app/ingest.py` | sliding word window + overlap | overlap avoids losing boundary sentences |
+| Ingest | `app/ingest.py` | PDF → text, per page (+ OCR fallback) | page labels are retained; OCR is attempted below 20 extracted characters |
+| Chunk | `app/ingest.py` | 380-word windows with 60-word overlap | also carries up to 120 words from the previous page, so a chunk's page label can include preceding-page text |
 | Embed | `app/embeddings.py` | text → 384-d vectors | fastembed (ONNX) — light, no PyTorch; asymmetric query/passage |
-| Index | `app/vectorstore.py` | Qdrant Cloud, shared collection | `chat_id` payload filter for isolation; L2-normalized vectors, cosine distance |
-| Retrieve | `app/rag.py` | top-k nearest chunks | k=5 balances context vs noise |
-| Generate | `app/llm.py` + `app/rag.py` | grounded LLM answer | low temperature + "answer only from context" prompt |
+| Index | `app/vectorstore.py` | Qdrant, shared collection | `chat_id` payload filter for isolation; L2-normalized vectors, cosine distance |
+| Retrieve | `app/rag.py` | top-k nearest chunks | k=5 by default; no relevance threshold or reranker |
+| Generate | `app/llm.py` + `app/rag.py` | stream a Groq answer | temperature 0.2; prompt requests grounding and inline citations, but neither is enforced |
 
 ---
 
 ## 🔒 Encryption at rest
 
-A stolen Mongo dump or a leaked Qdrant API key should not reveal notes, questions, answers, or file names. MongoDB Atlas and Qdrant Cloud already encrypt disks and the network connection. This project adds a second lock inside the saved fields themselves.
+The app encrypts selected Mongo fields and Qdrant payload fields before saving them. A database
+dump or Qdrant API key alone cannot decrypt those fields without the separate application keys.
+Metadata and Qdrant vectors remain readable to the database service.
 
-The app still sees readable text while it handles a request. FastAPI has to read the PDF, build the search numbers, and send the question plus the matching passages to Groq. When the request finishes, only the locked copy remains in the databases. The browser still shows a normal answer. Traffic between the browser, Vercel, FastAPI, Groq, Mongo, and Qdrant is protected by HTTPS when those addresses start with `https://`.
+The app still handles readable text during a request. FastAPI reads the PDF, creates embeddings,
+and sends the question plus retrieved passages to Groq. The encrypted fields are saved to the
+databases; the browser receives readable responses. Configure HTTPS for every deployed service
+connection.
 
 Two keys, one per service. Next.js is the only process that talks to Mongo, so it alone holds `MONGO_FIELD_KEY`. FastAPI is the only process that talks to Qdrant, so it alone holds `QDRANT_PAYLOAD_KEY`. Each key is 32 random bytes, base64, in that service's environment. It is never written into the Docker image or into git. Losing a key makes the values it locked unreadable.
 
@@ -118,10 +126,29 @@ Put the first value in `backend/.env` as `QDRANT_PAYLOAD_KEY`, and the second in
 
 ### Prerequisites
 - Python 3.11+, Node.js 20.9+
-- A free **Groq API key** → https://console.groq.com
-- A free **MongoDB Atlas** cluster → https://cloud.mongodb.com
-- A free **Qdrant Cloud** cluster → https://cloud.qdrant.io
-- (Optional for real email) SMTP credentials — Ethereal (auto, no signup) works out of the box for dev
+- A **Groq API key** → https://console.groq.com
+- A **MongoDB** connection (for example, MongoDB Atlas) → https://cloud.mongodb.com
+- A **Qdrant** instance (for example, Qdrant Cloud) → https://cloud.qdrant.io
+- SMTP credentials for delivered OTP email, or `USE_ETHEREAL=true` for a local test-inbox preview
+
+Create `backend/.env` from `backend/.env.example` and create `frontend/.env.local` with these
+settings. Keep the same `INTERNAL_API_SECRET` in both files; generate both encryption keys
+separately as shown above.
+
+| Service | Setting | Purpose |
+|---------|---------|---------|
+| Backend | `GROQ_API_KEY` | Generate streamed answers |
+| Backend | `QDRANT_URL`, `QDRANT_API_KEY` | Store and search PDF chunks |
+| Backend | `QDRANT_PAYLOAD_KEY` | Encrypt Qdrant passage text and document names |
+| Both | `INTERNAL_API_SECRET` | Authenticate Next.js requests to FastAPI |
+| Frontend | `MONGODB_URI` | Store users, sessions, chats, messages, and document records |
+| Frontend | `MONGO_FIELD_KEY` | Encrypt selected Mongo fields and derive email lookup fingerprints |
+| Frontend | `FASTAPI_URL` | Internal FastAPI URL; defaults to `http://127.0.0.1:8000` locally |
+| Frontend | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | Send real OTP email; alternatively set `USE_ETHEREAL=true` for preview-only development mail |
+
+Optional settings: backend `GROQ_MODEL`, `EMBED_MODEL`, `QDRANT_COLLECTION`,
+`MAX_CONCURRENT_INGESTS`, and `INGEST_BATCH_SIZE`; frontend `MONGODB_DB`, `OTP_PEPPER`,
+`EMAIL_FROM`, and `SESSION_TTL_DAYS`. Set a random `OTP_PEPPER` for deployed instances.
 
 ### 1. Backend
 ```powershell
@@ -129,7 +156,7 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-copy .env.example .env      # then fill in GROQ_API_KEY, INTERNAL_API_SECRET, QDRANT_URL, QDRANT_API_KEY, QDRANT_PAYLOAD_KEY
+copy .env.example .env      # then fill in the backend settings in the table above
 python -m uvicorn app.main:app --port 8000
 ```
 
@@ -137,18 +164,20 @@ python -m uvicorn app.main:app --port 8000
 ```powershell
 cd frontend
 npm install
-# create frontend/.env.local — see CLAUDE.md for the full variable list
-# include MONGO_FIELD_KEY (base64 of 32 random bytes) or chat saves and login will fail
+# create .env.local with the frontend settings in the table above
+# use the same INTERNAL_API_SECRET as backend/.env
 npm run dev
 ```
-Open **http://localhost:3000**, sign in with your email, upload a PDF, and start asking questions.
+Open **http://localhost:3000**, sign in with your email code, upload a PDF, and start asking questions.
+With `USE_ETHEREAL=true`, the OTP response contains a preview URL instead of delivering mail.
 
 ### 3. (Optional) Run the checks
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe smoke_test.py      # embed -> Qdrant -> retrieve, needs QDRANT_URL set
-.\.venv\Scripts\python.exe eval_retrieval.py  # Recall@k / MRR, fully local
-.\.venv\Scripts\python.exe test_ocr.py        # OCR fallback check
+.\.venv\Scripts\python.exe smoke_test.py      # embed -> Qdrant -> retrieve; needs Qdrant URL, API key, and payload key
+.\.venv\Scripts\python.exe eval_retrieval.py  # six-example Recall@3 / MRR check; model may download on first run
+.\.venv\Scripts\python.exe test_page_tail.py  # page-tail chunking check
+.\.venv\Scripts\python.exe test_ocr.py        # OCR fallback check; also needs Pillow installed
 ```
 
 ### Or start both at once
@@ -161,18 +190,23 @@ cd backend
 docker-compose up --build
 ```
 Builds and runs both services (`backend/Dockerfile`, `frontend/Dockerfile`) using `backend/.env` and
-`frontend/.env.local` — frontend on `:3000`, backend on `:8000`, with a named volume for uploaded PDFs.
+`frontend/.env.local` — frontend on `:3000`, backend on `:8000`, with a named volume for temporary
+upload files. Indexed chunks are stored in Qdrant.
 
 ---
 
 ## ☁️ Deployment
+The README's documented hosting layout is below. Confirm the active deployment and demo URL in
+the hosting dashboards; application source code alone does not establish their current status.
+
 - **Frontend:** Vercel (root directory `frontend`)
-- **Backend:** Render (root directory `backend`, free tier — sleeps after 15 min idle)
-- **Auth/chat data:** MongoDB Atlas (free tier)
-- **Vectors:** Qdrant Cloud (free tier)
+- **Backend:** Render (root directory `backend`)
+- **Auth/chat data:** MongoDB Atlas
+- **Vectors:** Qdrant Cloud
 - **Or self-host either service** from its Dockerfile — see `docker-compose.yml`
 
-See `CLAUDE.md` for the full environment variable reference for each service.
+Configure the variables in the Getting Started table for each deployed service. Hosting plans,
+limits, and idle behavior depend on the current provider configuration.
 
 ---
 
@@ -196,7 +230,7 @@ AI-Study-Help/
 │   │   ├── vectorstore.py    # Qdrant collection + per-chat payload filtering
 │   │   ├── store_manager.py  # per-chat locks + VectorStore access
 │   │   ├── llm.py            # Groq streaming wrapper
-│   │   ├── rag.py            # the RAG engine (retrieve + prompt + generate, web-search fallback)
+│   │   ├── rag.py            # the RAG engine (retrieve + build the model prompt)
 │   │   └── main.py           # FastAPI endpoints (incl. segmented PDF upload)
 │   ├── smoke_test.py         # embed -> Qdrant -> retrieve sanity check
 │   ├── eval_retrieval.py     # Recall@k / MRR harness
@@ -208,7 +242,7 @@ AI-Study-Help/
     └── src/
         ├── app/
         │   ├── page.tsx          # owns all app state
-        │   └── api/              # Next.js routes = the real backend (BFF)
+        │   └── api/              # Next.js routes for auth, data, and FastAPI proxying (BFF)
         │       ├── auth/         # request-otp, verify-otp, me, logout
         │       ├── quota/        # reserve/release storage quota
         │       └── chats/[id]/   # chat, messages, delete, upload/segment, upload/status
@@ -224,20 +258,27 @@ AI-Study-Help/
             ├── fastapi.ts        # server-side fetch to the FastAPI service
             ├── fieldcipher.ts     # AES-256-GCM for Mongo fields + email fingerprint
             ├── pdfSplit.ts       # client-side PDF splitting into upload-sized parts
-            ├── quota.ts          # atomic per-user storage reserve/release (Mongo)
+            ├── quota.ts          # atomic per-user storage reservation and cleanup (Mongo)
             └── uploadLimits.ts   # shared size/quota constants
 ```
 
 ## 🔒 Notes
 - `.env` / `.env.local` are git-ignored — never commit them. That includes `QDRANT_PAYLOAD_KEY` and `MONGO_FIELD_KEY`. A lost key cannot be recovered from the database.
-- FastAPI has no user-level auth of its own — every request requires a shared secret header,
-  and real authorization (session, chat ownership) happens entirely in the Next.js layer.
+- FastAPI has no user-level auth of its own. Its RAG and upload endpoints require a shared secret
+  header; `/api/health` is public. Session and chat-ownership checks happen in the Next.js layer.
 - Chats return **404, not 403** when you don't own them, so responses can't be used to guess
   which chat IDs exist.
-- Qdrant `IndexFlatIP`-equivalent exact search is used via a single shared collection filtered
-  by `chat_id`; at a much larger scale you'd move to an approximate index (HNSW) for speed.
+- Qdrant searches the shared cosine-distance collection with a `chat_id` filter. The code does not
+  request exact search; Qdrant may use [HNSW or a full scan](https://qdrant.tech/documentation/manage-data/indexing/)
+  according to its index and query planner.
 - Storage quota is enforced with an atomic Mongo `findOneAndUpdate` (`frontend/src/lib/quota.ts`)
-  so concurrent uploads can't race past the per-user limit; stale `processing` docs are swept and
-  their reserved space released.
-- Large PDFs are split into ≤4MB parts in the browser (`pdfSplit.ts`) and uploaded as segments,
-  since Vercel/most hosts cap request bodies well below typical PDF sizes.
+  so concurrent reservations cannot exceed the per-user limit. Stale `processing` documents are
+  checked and their reserved space released when a quota operation calls `migrateUserQuotas()`;
+  there is no scheduled sweeper.
+- The backend keeps upload job status in memory (`backend/app/jobs.py`) and runs ingestion in daemon
+  threads. A backend restart can lose an in-progress job, although indexed chunks already written
+  to Qdrant remain there.
+- PDFs are split into parts of at most 4 MiB in the browser (`pdfSplit.ts`) and uploaded one part
+  at a time. The file limit is 50 MiB; a page that cannot fit in one part is rejected.
+- There is no web-search tool wired to the Groq call. The prompt mentions web search, but the app
+  cannot perform one; retrieved sources and generated citations should be checked by the reader.
