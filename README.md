@@ -8,7 +8,10 @@ the source. The model's claims and inline citations are not independently verifi
 Built on a **Retrieval-Augmented Generation (RAG)** pipeline with a streaming chat UI, email-OTP
 auth, and Qdrant vector search.
 
-**Demo URL:** https://ai-study-help-five.vercel.app
+
+
+**Live:** https://recall.theprajwal.tech 
+
 
 `backend/eval_retrieval.py` computes Recall@3 and MRR on six hand-written passage/question pairs
 using local embeddings. It does not evaluate PDF extraction, Qdrant search, or generated answers.
@@ -278,7 +281,12 @@ AI-Study-Help/
 - The backend keeps upload job status in memory (`backend/app/jobs.py`) and runs ingestion in daemon
   threads. A backend restart can lose an in-progress job, although indexed chunks already written
   to Qdrant remain there.
-- PDFs are split into parts of at most 4 MiB in the browser (`pdfSplit.ts`) and uploaded one part
-  at a time. The file limit is 50 MiB; a page that cannot fit in one part is rejected.
+- PDFs are split into page-based parts of at most 4 MiB in the browser (`pdfSplit.ts`) and uploaded
+  one part at a time. The file limit is 50 MiB; a page that cannot fit in one part is rejected.
+  Each part starts with a page-count estimate based on the source file's average bytes per page and
+  a 3,600 KiB (about 3.5 MiB) target. If the generated part exceeds 4 MiB, the splitter halves
+  that part's page range until it fits. The next part starts from the original estimate, so an
+  unusually large range does not force every later part to stay small. FastAPI processes each part
+  before the browser uploads the next; it does not reassemble the original PDF.
 - There is no web-search tool wired to the Groq call. The prompt mentions web search, but the app
   cannot perform one; retrieved sources and generated citations should be checked by the reader.
