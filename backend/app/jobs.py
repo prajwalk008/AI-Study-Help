@@ -1,4 +1,4 @@
-"""In-memory registry for background ingestion jobs (single Render instance, no queue needed)."""
+"""In-memory registry for background ingestion jobs on a single backend instance."""
 import threading
 from typing import Dict, List, Optional
 

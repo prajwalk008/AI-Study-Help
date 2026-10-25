@@ -199,11 +199,10 @@ upload files. Indexed chunks are stored in Qdrant.
 ---
 
 ## ☁️ Deployment
-The README's documented hosting layout is below. Confirm the active deployment and demo URL in
-the hosting dashboards; application source code alone does not establish their current status.
+Current hosting layout:
 
 - **Frontend:** Vercel (root directory `frontend`)
-- **Backend:** Render (root directory `backend`)
+- **Backend:** Containerized FastAPI service on Azure (built from `backend/Dockerfile`)
 - **Auth/chat data:** MongoDB Atlas
 - **Vectors:** Qdrant Cloud
 - **Or self-host either service** from its Dockerfile — see `docker-compose.yml`

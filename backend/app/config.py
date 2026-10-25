@@ -43,5 +43,5 @@ PAGE_TAIL_WORDS = 120
 # Only this many background ingest jobs run at once (extra jobs wait in queue).
 MAX_CONCURRENT_INGESTS = int(os.getenv("MAX_CONCURRENT_INGESTS", "1"))
 
-# Smaller batches = lower peak RAM on 512 MB Render instances.
+# Smaller batches reduce peak RAM usage in the backend container.
 INGEST_BATCH_SIZE = int(os.getenv("INGEST_BATCH_SIZE", "50"))

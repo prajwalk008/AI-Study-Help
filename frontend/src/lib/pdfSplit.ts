@@ -37,13 +37,14 @@ export async function splitPdfIntoParts(file: File, onProgress?: (pct: number) =
   }
 
   const bytesPerPage = fileSize / totalPages;
-  let guessPages = Math.max(1, Math.floor(SPLIT_TARGET_BYTES / bytesPerPage));
+  const estimatedPagesPerPart = Math.max(1, Math.floor(SPLIT_TARGET_BYTES / bytesPerPage));
 
   const parts: PdfPart[] = [];
   let start = 0;
 
   while (start < totalPages) {
-    let end = Math.min(start + guessPages - 1, totalPages - 1);
+    // Start each part from the average estimate; back off only for this part.
+    let end = Math.min(start + estimatedPagesPerPart - 1, totalPages - 1);
     let partBytes = await buildPartBytes(src, start, end);
 
     while (partBytes.byteLength > MAX_PART_BYTES && end > start) {
@@ -64,7 +65,6 @@ export async function splitPdfIntoParts(file: File, onProgress?: (pct: number) =
       partIndex: parts.length,
     });
 
-    guessPages = Math.max(1, end - start + 1);
     start = end + 1;
     onProgress?.(start / totalPages);
   }

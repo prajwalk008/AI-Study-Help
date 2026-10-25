@@ -18,6 +18,7 @@ npm-debug.log*
 # Misc
 .DS_Store
 *.log
+.codesight-cache.json
 
 # Local credential notes (never commit real secrets)
 backend/AI_Study_help_api_key.txt
@@ -29,3 +30,7 @@ DESIGN_NOTES.md
 PROJECT_SUMMARY.md
 
 .cursor
+
+
+0001
+1110
