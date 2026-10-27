@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { ObjectId } from "mongodb";
 import { getDb } from "@/lib/mongo";
 import { requireOwnedChat } from "@/lib/chatauth";
-import { fastapiFetch } from "@/lib/fastapi";
+import { refreshDocumentJob } from "@/lib/documentJob";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,25 +19,6 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const doc = await db.collection("documents").findOne({ chatId: id, docId });
   if (!doc) return NextResponse.json({ error: "Document not found." }, { status: 404 });
 
-  const upstream = await fastapiFetch(`/api/upload/status?doc_id=${encodeURIComponent(docId)}`);
-  const job = await upstream.json().catch(() => ({}));
-  if (!upstream.ok) {
-    return NextResponse.json({ error: job.error || "Status unavailable." }, { status: upstream.status });
-  }
-
-  if (job.status === "done") {
-    await db.collection("documents").updateOne(
-      { _id: doc._id },
-      { $set: { status: "indexed", chunks: job.stats.chunks, pages: job.stats.pages } }
-    );
-    await db.collection("chats").updateOne({ _id: new ObjectId(id) }, { $set: { updatedAt: new Date() } });
-  } else if (job.status === "error") {
-    await db.collection("documents").updateOne({ _id: doc._id }, { $set: { status: "error" } });
-    if (doc.status === "processing" && doc.sizeBytes) {
-      const { releaseStorage } = await import("@/lib/quota");
-      await releaseStorage(doc.userId, doc.sizeBytes);
-    }
-  }
-
-  return NextResponse.json(job);
+  const result = await refreshDocumentJob(doc);
+  return NextResponse.json(result.job, { status: result.status });
 }

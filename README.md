@@ -28,7 +28,8 @@ using local embeddings. It does not evaluate PDF extraction, Qdrant search, or g
 - ✍️ **Rich markdown answers** — tables, code blocks, and lists render properly (`react-markdown` + GFM), not raw text
 - ⚡ **Token-by-token streaming** — answers type out live
 - 🔍 **Semantic search** — finds meaning, not just keyword matches, via a cloud vector database
-- 📦 **PDF uploads from the browser** — files up to 50 MiB are split by page into parts of at most 4 MiB (`pdf-lib`) and uploaded sequentially; a single page over 4 MiB must be compressed first
+- 📦 **PDF uploads from the browser** — files up to 50 MiB are split by page into parts of at most 4 MiB (`pdf-lib`) and saved in Blob Storage; a single page over 4 MiB must be compressed first
+- 🔁 **Recoverable indexing** — Blob Storage saves progress and Azure Queue starts an on-demand PDF worker
 - 📊 **Per-user storage quota** — 100 MiB per user by default; Mongo atomically reserves space for uploads, and cleanup releases it on failure or deletion
 - 📱 **Responsive** — sidebar collapses on mobile *and* can be toggled closed on desktop
 - 🎨 **Responsive light UI** — Next.js + Tailwind, with custom branding and animated loading states
@@ -61,6 +62,15 @@ Each chat's chunks live in **one shared Qdrant collection**, isolated via a `cha
 filter rather than one collection per chat. Qdrant persists the chunks across backend restarts and
 redeploys even when the backend has ephemeral disk. The Next.js layer checks chat ownership before
 calling the internal FastAPI service.
+
+For uploads, Next.js sends each PDF part to FastAPI, which saves it in Azure Blob Storage.
+Once all parts arrive, FastAPI puts the document ID in Azure Queue Storage. An event-driven
+Container Apps Job starts one worker for the document. It saves a Blob checkpoint after each part
+and exits when the document is finished. The API
+can scale to zero between requests, and the worker has zero minimum executions. Completed parts
+are removed after indexing succeeds. If a worker stops mid-part, its queue message becomes visible
+again and a later execution resumes from the last checkpoint. Qdrant point IDs are
+deterministic, so replaying an unfinished part overwrites its earlier chunks.
 
 ### The RAG pipeline (stage by stage)
 | Stage | File | What it does | Key choice |
@@ -132,6 +142,7 @@ Put the first value in `backend/.env` as `QDRANT_PAYLOAD_KEY`, and the second in
 - A **Groq API key** → https://console.groq.com
 - A **MongoDB** connection (for example, MongoDB Atlas) → https://cloud.mongodb.com
 - A **Qdrant** instance (for example, Qdrant Cloud) → https://cloud.qdrant.io
+- An Azure Storage account with Blob Storage and Queue Storage, plus a container for temporary PDF parts
 - SMTP credentials for delivered OTP email, or `USE_ETHEREAL=true` for a local test-inbox preview
 
 Create `backend/.env` from `backend/.env.example` and create `frontend/.env.local` with these
@@ -143,6 +154,7 @@ separately as shown above.
 | Backend | `GROQ_API_KEY` | Generate streamed answers |
 | Backend | `QDRANT_URL`, `QDRANT_API_KEY` | Store and search PDF chunks |
 | Backend | `QDRANT_PAYLOAD_KEY` | Encrypt Qdrant passage text and document names |
+| Backend | `AZURE_STORAGE_CONNECTION_STRING`, `AZURE_BLOB_CONTAINER`, `AZURE_QUEUE_NAME` | Save PDF parts and progress; queue indexing work |
 | Both | `INTERNAL_API_SECRET` | Authenticate Next.js requests to FastAPI |
 | Frontend | `MONGODB_URI` | Store users, sessions, chats, messages, and document records |
 | Frontend | `MONGO_FIELD_KEY` | Encrypt selected Mongo fields and derive email lookup fingerprints |
@@ -150,7 +162,7 @@ separately as shown above.
 | Frontend | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | Send real OTP email; alternatively set `USE_ETHEREAL=true` for preview-only development mail |
 
 Optional settings: backend `GROQ_MODEL`, `EMBED_MODEL`, `QDRANT_COLLECTION`,
-`MAX_CONCURRENT_INGESTS`, and `INGEST_BATCH_SIZE`; frontend `MONGODB_DB`, `OTP_PEPPER`,
+and `INGEST_BATCH_SIZE`; frontend `MONGODB_DB`, `OTP_PEPPER`,
 `EMAIL_FROM`, and `SESSION_TTL_DAYS`. Set a random `OTP_PEPPER` for deployed instances.
 
 ### 1. Backend
@@ -171,7 +183,7 @@ npm install
 # use the same INTERNAL_API_SECRET as backend/.env
 npm run dev
 ```
-Open **http://localhost:3000**, sign in with your email code, upload a PDF, and start asking questions.
+Configure Blob and Queue Storage before uploading. Then open **http://localhost:3000**, sign in with your email code, upload a PDF, and start asking questions.
 With `USE_ETHEREAL=true`, the OTP response contains a preview URL instead of delivering mail.
 
 ### 3. (Optional) Run the checks
@@ -192,20 +204,49 @@ cd backend
 ```powershell
 docker-compose up --build
 ```
-Builds and runs both services (`backend/Dockerfile`, `frontend/Dockerfile`) using `backend/.env` and
-`frontend/.env.local` — frontend on `:3000`, backend on `:8000`, with a named volume for temporary
-upload files. Indexed chunks are stored in Qdrant.
+Builds the frontend and FastAPI services (`backend/Dockerfile`, `frontend/Dockerfile`). PDF upload
+also requires the Azure Storage account and Blob container above; this Compose file does not start them.
 
 ---
 
 ## ☁️ Deployment
-Current hosting layout:
+Deployment layout after the workflow runs:
 
 - **Frontend:** Vercel (root directory `frontend`)
-- **Backend:** Containerized FastAPI service on Azure (built from `backend/Dockerfile`)
+- **Backend:** FastAPI on Azure Container Apps Express, scaling from 0 to 2 replicas for HTTP traffic
+- **Warm-up:** While the Recall page is visible and has had user activity within the past hour,
+  the browser calls the Next.js `/api/backend/warm` route on load, every two minutes, and when
+  the tab becomes visible again. That route calls FastAPI `/api/warm` without caching to load the
+  query embedding model. Until the new backend is deployed, it falls back to `/api/health`. Hidden
+  tabs and pages left untouched for over an hour stop sending warm-up requests.
+  The first visit after a long idle period can still wait for the API to start; keeping a page open
+  keeps API compute billable while it is running.
+- **PDF jobs:** An event-driven Container Apps Job in a standard Consumption environment starts
+  when Azure Queue has a document. It processes its parts in order and exits, with zero minimum executions.
+  Blob Storage holds PDF parts and checkpoints.
+- **Idle cost:** The Job has no running worker when the queue is empty, and the API has zero minimum
+  replicas. The Job uses the Consumption profile, with no dedicated workload profile or log workspace.
+  Azure still charges for storage, registry, and usage beyond applicable free grants; a monthly
+  rupee amount depends on upload volume and the subscription's other usage.
 - **Auth/chat data:** MongoDB Atlas
 - **Vectors:** Qdrant Cloud
 - **Or self-host either service** from its Dockerfile — see `docker-compose.yml`
+
+`.github/workflows/deploy-backend.yml` checks frontend types and builds and tests the backend
+images on pull requests to `master`, without changing Azure. When backend code is pushed to
+`master` (or the workflow is started manually from `master`), it builds the API and worker images,
+runs the Blob and Queue tests against Azurite, and pushes commit-tagged images to the existing
+Azure Container Registry. It
+updates the worker Job first, then the existing Container App. Azure Container Apps keeps the
+previous API revision serving HTTP traffic until the new one starts. The workflow checks that
+`/api/health` reports the pushed commit. The API remains able to scale to zero; the Job runs only
+for queued work. Queue checks can add a short wait before indexing starts.
+Older images remain in the registry for rollback; the workflow does not delete them.
+
+For the **first** migration from the old in-memory upload worker, deploy while no PDFs are being
+indexed: that old worker cannot resume a part interrupted by its container shutting down. The
+frontend and backend upload protocols also change together, so coordinate their first rollout.
+Later revisions replay unfinished parts from Blob checkpoints and Queue messages.
 
 Configure the variables in the Getting Started table for each deployed service. Hosting plans,
 limits, and idle behavior depend on the current provider configuration.
@@ -222,10 +263,15 @@ AI-Study-Help/
 ├── docker-compose.yml     # runs backend + frontend together
 ├── backend/
 │   ├── Dockerfile
+│   ├── Dockerfile.worker  # same backend code, one-shot worker command
 │   ├── app/
 │   │   ├── config.py         # tunable RAG knobs + env vars
 │   │   ├── ingest.py         # PDF extraction + chunking (+ OCR fallback, page-tail carry-over)
-│   │   ├── jobs.py           # background job tracking for async/segmented uploads
+│   │   ├── jobs.py           # worker scratch state for PDF chunking
+│   │   ├── durable_jobs.py   # Blob parts, checkpoints, and Queue messages
+│   │   ├── queue_worker.py   # process one queued PDF per Job execution
+│   │   ├── worker_entry.py   # run the on-demand worker and exit
+│   │   ├── ingest_worker.py  # process and checkpoint one PDF part
 │   │   ├── ocr.py            # RapidOCR fallback for scanned/image-only pages
 │   │   ├── embeddings.py     # fastembed wrapper (normalized vectors)
 │   │   ├── fieldcipher.py    # AES-256-GCM for Qdrant passage text and file names
@@ -277,15 +323,23 @@ AI-Study-Help/
   so concurrent reservations cannot exceed the per-user limit. Stale `processing` documents are
   checked and their reserved space released when a quota operation calls `migrateUserQuotas()`;
   there is no scheduled sweeper.
-- The backend keeps upload job status in memory (`backend/app/jobs.py`) and runs ingestion in daemon
-  threads. A backend restart can lose an in-progress job, although indexed chunks already written
-  to Qdrant remain there.
+- FastAPI saves parts and job state in Blob Storage. The event-driven Job consumes the queue and
+  saves a checkpoint after each part. `backend/app/jobs.py` is scratch state during one part.
+  An interrupted part can be replayed from its last checkpoint. The API can scale to zero while
+  Azure Queue starts the worker independently.
+- Opening a chat refreshes active document statuses from Blob Storage, so an upload can finish after the
+  browser closes. The status check updates Mongo and releases quota if the job failed.
+- Successfully indexed PDF parts are removed. Configure an Azure Blob lifecycle rule for abandoned
+  uploads under `documents/`, with retention longer than the recovery window you want.
 - PDFs are split into page-based parts of at most 4 MiB in the browser (`pdfSplit.ts`) and uploaded
   one part at a time. The file limit is 50 MiB; a page that cannot fit in one part is rejected.
   Each part starts with a page-count estimate based on the source file's average bytes per page and
   a 3,600 KiB (about 3.5 MiB) target. If the generated part exceeds 4 MiB, the splitter halves
   that part's page range until it fits. The next part starts from the original estimate, so an
-  unusually large range does not force every later part to stay small. FastAPI processes each part
-  before the browser uploads the next; it does not reassemble the original PDF.
+  unusually large range does not force every later part to stay small. The browser uploads all
+  parts before indexing starts. The worker processes them in page order and does not reassemble
+  the original PDF.
+- Chat deletion waits for active PDF indexing to finish, so a worker cannot add chunks after the
+  chat's Qdrant data has been deleted.
 - There is no web-search tool wired to the Groq call. The prompt mentions web search, but the app
   cannot perform one; retrieved sources and generated citations should be checked by the reader.

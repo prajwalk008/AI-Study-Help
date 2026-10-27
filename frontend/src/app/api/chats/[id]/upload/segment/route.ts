@@ -44,8 +44,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   const db = await getDb();
   const reservation = await db.collection("documents").findOne({ chatId: id, uploadId });
-  if (!reservation || reservation.status !== "processing") {
+  if (!reservation || (reservation.status !== "processing" && reservation.status !== "queued")) {
     return NextResponse.json({ error: "Upload session not found." }, { status: 404 });
+  }
+  if (typeof docId === "string" && docId && reservation.docId && docId !== reservation.docId) {
+    return NextResponse.json({ error: "Document ID changed." }, { status: 409 });
   }
 
   const upstreamForm = new FormData();
@@ -58,7 +61,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     page_offset: pageOffset,
     total_pages: totalPages,
   });
-  if (typeof docId === "string" && docId) qs.set("doc_id", docId);
+  const knownDocId = (typeof docId === "string" && docId) || reservation.docId || uploadId.replaceAll("-", "");
+  if (knownDocId) qs.set("doc_id", knownDocId);
 
   const upstream = await fastapiFetch(`/api/upload/segment?${qs}`, {
     method: "POST",
@@ -75,6 +79,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     await db.collection("documents").updateOne(
       { _id: reservation._id },
       { $set: { docId: body.doc_id as string } }
+    );
+  }
+  if (Number(segmentIndex) + 1 === Number(totalSegments) && reservation.status === "processing") {
+    await db.collection("documents").updateOne(
+      { _id: reservation._id },
+      { $set: { status: "queued" } }
     );
   }
 
