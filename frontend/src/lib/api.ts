@@ -38,7 +38,7 @@ export interface Message {
   status?: string;
 }
 
-export type PartPhase = "pending" | "uploading" | "processing" | "done" | "error";
+export type PartPhase = "pending" | "uploading" | "uploaded" | "processing" | "done" | "error";
 
 export interface UploadPartState {
   index: number;
@@ -155,22 +155,41 @@ async function releaseQuota(uploadId: string) {
   }).catch(() => {});
 }
 
-async function pollUntilSegmentDone(
+async function uploadPart(chatId: string, form: FormData): Promise<{ docId: string }> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch(`/api/chats/${chatId}/upload/segment`, {
+        method: "POST", body: form,
+      });
+    } catch (error) {
+      if (attempt === 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+      continue;
+    }
+    const body = await response.json().catch(() => ({}));
+    if (response.ok) return body as { docId: string };
+    if (response.status < 500 || attempt === 2) {
+      throw new Error(body.error || "Part upload failed.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+  }
+  throw new Error("Part upload failed.");
+}
+
+async function pollUntilDocumentDone(
   chatId: string,
   docId: string,
-  segmentIndex: number,
-  onDetail: (detail: string) => void
+  totalParts: number,
+  onProgress: (completed: number, detail: string) => void
 ): Promise<UploadResult> {
   for (;;) {
     const res = await fetch(`/api/chats/${chatId}/upload/status?docId=${encodeURIComponent(docId)}`);
     const job = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(job.error || "Status check failed");
     if (job.status === "error") throw new Error(job.error || "Failed to ingest PDF.");
-    if (job.stage) onDetail(job.stage);
-    if ((job.completed_segments ?? 0) > segmentIndex) {
-      if (job.status === "done" && job.stats) return job.stats as UploadResult;
-      return { doc_name: "", chunks: 0, pages: 0 };
-    }
+    onProgress(Math.min(job.completed_segments ?? 0, totalParts), job.stage || "Queued");
+    if (job.status === "done" && job.stats) return job.stats as UploadResult;
     await new Promise((r) => setTimeout(r, STATUS_POLL_MS));
   }
 }
@@ -186,6 +205,7 @@ export async function uploadPdf(
 ): Promise<void> {
   const uploadId = crypto.randomUUID();
   let docId = "";
+  let submissionAttempted = false;
 
   const patch = (partial: Partial<UploadUiState> & { parts?: UploadPartState[] }) => {
     handlers.onUi({ ...ui, ...partial, parts: partial.parts ?? ui.parts });
@@ -266,31 +286,26 @@ export async function uploadPdf(
       if (docId) form.append("docId", docId);
       form.append("file", part.blob, `${file.name}.part${part.partIndex + 1}.pdf`);
 
-      const segRes = await fetch(`/api/chats/${chatId}/upload/segment`, { method: "POST", body: form });
-      const segBody = await segRes.json().catch(() => ({}));
-      if (!segRes.ok) throw new Error(segBody.error || "Part upload failed.");
-
-      docId = segBody.docId as string;
-      partStates[part.partIndex] = { index: part.partIndex, phase: "processing", detail: "Starting…" };
+      if (part.partIndex + 1 === parts.length) submissionAttempted = true;
+      const segBody = await uploadPart(chatId, form);
+      docId = segBody.docId;
+      partStates[part.partIndex] = { index: part.partIndex, phase: "uploaded" };
       patch({
-        stageLabel: `Processing part ${part.partIndex + 1} of ${parts.length}`,
+        stageLabel: `Uploaded part ${part.partIndex + 1} of ${parts.length}`,
         parts: [...partStates],
       });
-
-      await pollUntilSegmentDone(chatId, docId, part.partIndex, (detail) => {
-        partStates[part.partIndex] = { index: part.partIndex, phase: "processing", detail };
-        patch({ parts: [...partStates] });
-      });
-
-      partStates[part.partIndex] = { index: part.partIndex, phase: "done" };
-      patch({ parts: [...partStates] });
     }
 
-    const finalRes = await fetch(`/api/chats/${chatId}/upload/status?docId=${encodeURIComponent(docId)}`);
-    const finalJob = await finalRes.json().catch(() => ({}));
-    if (!finalRes.ok || finalJob.status !== "done") {
-      throw new Error(finalJob.error || "Indexing did not complete.");
-    }
+    const stats = await pollUntilDocumentDone(chatId, docId, parts.length, (completed, detail) => {
+      for (let index = 0; index < parts.length; index++) {
+        partStates[index] = {
+          index,
+          phase: index < completed ? "done" : index === completed ? "processing" : "uploaded",
+          detail: index === completed ? detail : undefined,
+        };
+      }
+      patch({ stageLabel: detail, parts: [...partStates] });
+    });
 
     const me = await getMe();
     if (me) {
@@ -300,10 +315,10 @@ export async function uploadPdf(
       };
     }
 
-    patch({ stageLabel: `Indexed — ${finalJob.stats.pages} pages · ${finalJob.stats.chunks} chunks` });
-    handlers.onDone(finalJob.stats as UploadResult, storage);
+    patch({ stageLabel: `Indexed — ${stats.pages} pages · ${stats.chunks} chunks` });
+    handlers.onDone(stats, storage);
   } catch (e) {
-    await releaseQuota(uploadId);
+    if (!submissionAttempted) await releaseQuota(uploadId);
     handlers.onError(e instanceof Error ? e.message : "Upload failed");
   }
 }

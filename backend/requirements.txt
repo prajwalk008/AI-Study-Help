@@ -9,3 +9,5 @@ qdrant-client
 groq
 python-dotenv
 cryptography
+azure-storage-blob
+azure-storage-queue
