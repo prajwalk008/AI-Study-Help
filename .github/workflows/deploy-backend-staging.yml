@@ -16,6 +16,9 @@ permissions:
 env:
   API_IMAGE: ghcr.io/prajwalk008/recall-backend:${{ github.sha }}
   WORKER_IMAGE: ghcr.io/prajwalk008/recall-ingest-worker:${{ github.sha }}
+  BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
+  API_IMAGE: ghcr.io/prajwalk008/recall-backend:${{ github.sha }}
+  WORKER_IMAGE: ghcr.io/prajwalk008/recall-ingest-worker:${{ github.sha }}
 
 jobs:
   build-and-publish:
