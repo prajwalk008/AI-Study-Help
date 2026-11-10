@@ -39,6 +39,40 @@ export default function Home() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    let inFlight = false;
+    let lastActivity = Date.now();
+    const warmBackend = () => {
+      if (document.visibilityState !== "visible" ||
+          Date.now() - lastActivity > 60 * 60 * 1000 || inFlight) return;
+      inFlight = true;
+      fetch("/api/backend/warm", { method: "POST", cache: "no-store" })
+        .catch(() => {})
+        .finally(() => { inFlight = false; });
+    };
+    const markActivity = () => { lastActivity = Date.now(); };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        markActivity();
+        warmBackend();
+      }
+    };
+
+    warmBackend();
+    const interval = window.setInterval(warmBackend, 2 * 60 * 1000);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("pointerdown", markActivity);
+    window.addEventListener("keydown", markActivity);
+    window.addEventListener("wheel", markActivity, { passive: true });
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("pointerdown", markActivity);
+      window.removeEventListener("keydown", markActivity);
+      window.removeEventListener("wheel", markActivity);
+    };
+  }, []);
+
+  useEffect(() => {
     try {
       const saved = localStorage.getItem("recall.sidebarOpen");
       if (saved === "0" || saved === "1") {

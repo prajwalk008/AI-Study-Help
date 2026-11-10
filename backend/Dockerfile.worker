@@ -1,0 +1,4 @@
+ARG BASE_IMAGE=recall-backend:queue-local
+FROM ${BASE_IMAGE}
+
+CMD ["python", "-m", "app.worker_entry"]

@@ -20,7 +20,7 @@ export async function migrateUserQuotas(): Promise<void> {
   const needsMigration = await users.find({ storageQuotaBytes: { $exists: false } }).toArray();
   for (const user of needsMigration) {
     const indexed = await docs
-      .find({ userId: user._id, status: { $in: ["indexed", "processing"] } })
+      .find({ userId: user._id, status: { $in: ["indexed", "processing", "queued"] } })
       .toArray();
     const used = indexed.reduce((sum, d) => sum + (d.sizeBytes || 0), 0);
     await users.updateOne(

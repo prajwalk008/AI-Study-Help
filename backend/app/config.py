@@ -10,6 +10,10 @@ EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 
 # Shared secret required on every RAG endpoint (Next.js sends it server-side).
 INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
+AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "")
+AZURE_BLOB_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "recall-uploads")
+AZURE_QUEUE_NAME = os.getenv("AZURE_QUEUE_NAME", "recall-ingest")
+BUILD_SHA = os.getenv("BUILD_SHA", "")
 
 # Qdrant Cloud: vector storage (shared collection, isolated per chat via a payload filter).
 QDRANT_URL = os.getenv("QDRANT_URL", "")
@@ -29,19 +33,11 @@ OCR_ENABLED = True
 OCR_DPI = 200
 MIN_TEXT_CHARS_PER_PAGE = 20  # below this we assume the page has no real text layer
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
-
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
 # Browser splits before upload; each part must be <= 4 MB.
 MAX_SEGMENT_BYTES = 4 * 1024 * 1024
 
 # Last N words of each page are prepended to the next page (and carried across parts).
 PAGE_TAIL_WORDS = 120
-
-# Only this many background ingest jobs run at once (extra jobs wait in queue).
-MAX_CONCURRENT_INGESTS = int(os.getenv("MAX_CONCURRENT_INGESTS", "1"))
 
 # Smaller batches reduce peak RAM usage in the backend container.
 INGEST_BATCH_SIZE = int(os.getenv("INGEST_BATCH_SIZE", "50"))

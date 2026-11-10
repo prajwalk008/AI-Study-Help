@@ -153,6 +153,7 @@ function UploadStepper({ ui }: { ui: UploadUiState }) {
               <div className="min-w-0 flex-1">
                 <div>Part {p.index + 1}</div>
                 {p.phase === "uploading" && <div className="text-[var(--muted)]">Uploading…</div>}
+                {p.phase === "uploaded" && <div className="text-[var(--muted)]">Uploaded</div>}
                 {p.phase === "processing" && (
                   <div className="flex items-center gap-1 text-[var(--muted)]">
                     <Loader2 className="h-3 w-3 animate-spin" />
@@ -187,7 +188,7 @@ function Step({ done, label, active }: { done: boolean; label: string; active: b
 }
 
 function PartIcon({ phase }: { phase: string }) {
-  if (phase === "done") return <CheckCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--text)]" />;
+  if (phase === "done" || phase === "uploaded") return <CheckCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--text)]" />;
   if (phase === "processing" || phase === "uploading") {
     return <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-[var(--muted)]" />;
   }

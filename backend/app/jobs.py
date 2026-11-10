@@ -43,6 +43,11 @@ def get_job(doc_id: str) -> Optional[dict]:
         return dict(job) if job is not None else None
 
 
+def delete_job(doc_id: str) -> None:
+    with _lock:
+        _jobs.pop(doc_id, None)
+
+
 def get_page_tail(doc_id: str) -> List[str]:
     with _lock:
         job = _jobs.get(doc_id)
